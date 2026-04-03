@@ -29,6 +29,15 @@ function HomePage() {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
+  const [groqKey, setGroqKey] = useLocalStorage("groq_key", "");
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [showKeyNotif, setShowKeyNotif] = useState(false);
+
+  // Show the key notification on every page visit if no key is set
+  useEffect(() => {
+    const stored = localStorage.getItem("groq_key") || "";
+    if (!stored) setShowKeyNotif(true);
+  }, []);
 
   function parseInput(val) {
     val = val.trim();
@@ -48,14 +57,134 @@ function HomePage() {
   }
 
   const examples = [
-    { label: "facebook/react", path: "/facebook/react" },
     { label: "vercel/next.js", path: "/vercel/next.js" },
-    { label: "microsoft/vscode", path: "/microsoft/vscode" },
-    { label: "golang/go", path: "/golang/go" },
+    { label: "expressjs/express", path: "/expressjs/express" },
+    { label: "koajs/koa", path: "/koajs/koa" },
+    { label: "gin-gonic/gin", path: "/gin-gonic/gin" },
   ];
 
   return (
-    <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem", background: "var(--bg)" }}>
+    <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem", background: "var(--bg)", position: "relative" }}>
+
+      {/* Top-right API key button */}
+      <div style={{ position: "fixed", top: "1rem", right: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem", zIndex: 20 }}>
+        <button
+          onClick={() => setShowKeyInput(!showKeyInput)}
+          style={{
+            background: groqKey ? "rgba(34,197,94,0.1)" : "var(--bg-secondary)",
+            border: `1px solid ${groqKey ? "var(--success)" : "var(--border-active)"}`,
+            borderRadius: "6px",
+            color: groqKey ? "var(--success)" : "var(--text-secondary)",
+            fontSize: "0.78rem", padding: "0.35rem 0.75rem", cursor: "pointer",
+            fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap",
+          }}
+        >
+          {groqKey ? "● API key set" : "+ Add API key"}
+        </button>
+
+        {showKeyInput && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 0.5rem)", right: 0,
+            background: "var(--bg-secondary)", border: "1px solid var(--border-active)",
+            borderRadius: "8px", padding: "1rem", width: "320px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)", zIndex: 30,
+          }}>
+            <div style={{ fontSize: "0.8rem", color: "var(--text-primary)", fontWeight: 600, marginBottom: "0.4rem" }}>
+              Groq API key
+            </div>
+            <div style={{ fontSize: "0.73rem", color: "var(--text-muted)", marginBottom: "0.75rem", lineHeight: 1.5 }}>
+              Get a free key at{" "}
+              <a href="https://console.groq.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", cursor: "pointer" }}>console.groq.com</a>
+              . Stored in your browser only.
+            </div>
+            <input
+              type="password"
+              value={groqKey}
+              onChange={e => { setGroqKey(e.target.value); if (e.target.value) setNotifDismissed("1"); }}
+              placeholder="gsk_..."
+              autoFocus
+              style={{
+                width: "100%", boxSizing: "border-box",
+                background: "var(--bg)", border: "1px solid var(--border-active)",
+                borderRadius: "5px", color: "var(--text-primary)", padding: "0.45rem 0.6rem",
+                fontSize: "0.82rem", fontFamily: "inherit", outline: "none",
+              }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.6rem" }}>
+              <button
+                onClick={() => setShowKeyInput(false)}
+                style={{ background: "var(--accent)", border: "none", borderRadius: "4px", color: "#fff", fontSize: "0.78rem", padding: "0.3rem 0.75rem", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Key notification — modal overlay, shows every visit when no key set */}
+      {showKeyNotif && (
+        <div
+          onClick={() => setShowKeyNotif(false)}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 50, padding: "1rem",
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-active)",
+              borderRadius: "10px",
+              padding: "1.5rem",
+              maxWidth: "380px", width: "100%",
+              boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+              <span style={{ color: "var(--text-primary)", fontSize: "0.95rem", fontWeight: 700 }}>
+                Get better results
+              </span>
+              <button
+                onClick={() => setShowKeyNotif(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "1.1rem", lineHeight: 1, padding: 0, marginLeft: "1rem" }}
+              >
+                ×
+              </button>
+            </div>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.82rem", lineHeight: 1.6, margin: "0 0 1.1rem" }}>
+              Add your free Groq API key to unlock higher-accuracy results using a smarter model. Takes 2 minutes — no credit card needed.
+            </p>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button
+                onClick={() => { setShowKeyNotif(false); setShowKeyInput(true); }}
+                style={{
+                  flex: 1,
+                  background: "var(--accent)", border: "none", borderRadius: "6px",
+                  color: "#fff", fontSize: "0.82rem", padding: "0.55rem 1rem",
+                  cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
+                }}
+              >
+                Add key →
+              </button>
+              <button
+                onClick={() => setShowKeyNotif(false)}
+                style={{
+                  background: "none", border: "1px solid var(--border)", borderRadius: "6px",
+                  color: "var(--text-muted)", fontSize: "0.82rem", padding: "0.55rem 1rem",
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Maybe later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ width: "100%", maxWidth: "560px" }}>
         <div style={{ marginBottom: "2.5rem" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: "0.4rem", marginBottom: "0.9rem" }}>
@@ -66,7 +195,7 @@ function HomePage() {
             Minimum Context Finder
           </h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: "0.6rem", lineHeight: 1.6, maxWidth: "420px" }}>
-            Find the minimal set of files relevant to a task in any public GitHub repo. Embeddings run in your browser. Copy into AI tools.
+            Find the exact files you need for any task in any public GitHub repo. AI reads the actual code — not just keywords. Paste the links into Claude, ChatGPT, or Cursor.
           </p>
         </div>
 
@@ -101,9 +230,9 @@ function HomePage() {
 
         <div style={{ marginTop: "3rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
           {[
-            { label: "100% client-side", desc: "Embeddings run in your browser. Nothing sent to a server." },
-            { label: "No auth needed", desc: "Works with any public repo. Optional PAT for rate limits." },
-            { label: "Open source", desc: "MIT licensed. One-click Vercel deploy." },
+            { label: "Reads actual code", desc: "AI analyzes file contents and imports — not just filename keywords." },
+            { label: "Any language", desc: "JavaScript, TypeScript, Python, Go, Rust, Ruby, Java, and more." },
+            { label: "Built for AI tools", desc: "Copy file links directly into Claude, ChatGPT, Cursor, or any AI assistant." },
           ].map(({ label, desc }) => (
             <div key={label}>
               <div style={{ color: "var(--text-primary)", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.25rem" }}>{label}</div>
@@ -188,14 +317,28 @@ export default function RepoPage({ params }) {
 
       // ── Step 3: LLM binary pruning ────────────────────────────────────────
       setStep(3);
-      setStepDetail(`Asking AI to evaluate ${ordered.length} candidates...`);
 
-      const fileDescriptions = ordered.map(f => {
+      // Groq TPM = input_tokens + max_tokens_requested.
+      // With max_tokens=2500 and ~1,600 input tokens budget:
+      //   35 files × ~65 output tokens = 2,275 → fits in 2500
+      //   35 files × ~45 input tokens = 1,575 + 400 prompt = 1,975 input
+      //   Total: 1,975 + 2,500 = 4,475 << 6,000 TPM limit ✓
+      const MAX_LLM_FILES = 35;
+      const MAX_FILE_CHARS = 13000;
+      let fileDescriptions = "";
+      let includedForLLM = [];
+      for (const f of ordered) {
+        if (includedForLLM.length >= MAX_LLM_FILES) break;
         const detail = f.summary.startsWith(f.path + ": ")
           ? f.summary.slice(f.path.length + 2)
           : (f.summary || f.path);
-        return `FILE: ${f.path}\n${detail}`;
-      }).join("\n\n");
+        const entry = `FILE: ${f.path}\n${detail}`;
+        if (fileDescriptions.length + entry.length + 2 > MAX_FILE_CHARS) break;
+        fileDescriptions += (fileDescriptions ? "\n\n" : "") + entry;
+        includedForLLM.push(f);
+      }
+
+      setStepDetail(`Asking AI to evaluate ${includedForLLM.length} candidates...`);
 
       const llmHeaders = { "Content-Type": "application/json", ...(groqKey ? { "x-groq-key": groqKey } : {}) };
 
@@ -210,7 +353,7 @@ export default function RepoPage({ params }) {
 
 Task: "${task}"
 
-${ordered.length} candidate files are listed below. For each file:
+${includedForLLM.length} candidate files are listed below. For each file:
 Can it be REMOVED without preventing the task from being completed?
 
 REMOVE (removable: true) if the file:
@@ -233,12 +376,12 @@ Be aggressive — 4 perfect files beats 12 with noise. When in doubt, remove it.
 Return ONLY a JSON array — no markdown, no explanation:
 [{"file":"path","removable":false,"reason":"one sentence"},...]
 
-Include ALL ${ordered.length} files.
+Include ALL ${includedForLLM.length} files.
 
 FILES:
 ${fileDescriptions}`,
           }],
-          max_tokens: 4096,
+          max_tokens: 2500,
         }),
       });
 
@@ -256,12 +399,12 @@ ${fileDescriptions}`,
         pruneResults = JSON.parse(match ? match[0] : pruneText);
       } catch {
         // JSON parse failed — keep everything and continue
-        pruneResults = ordered.map(f => ({ file: f.path, removable: false, reason: "" }));
+        pruneResults = includedForLLM.map(f => ({ file: f.path, removable: false, reason: "" }));
       }
 
       const keptSet = new Set(pruneResults.filter(r => !r.removable).map(r => r.file));
       // Safety: if LLM removed too many, keep all
-      if (keptSet.size < 3) ordered.forEach(f => keptSet.add(f.path));
+      if (keptSet.size < 3) includedForLLM.forEach(f => keptSet.add(f.path));
 
       const keptFiles = ordered.filter(f => keptSet.has(f.path));
       setStepDetail(`Pruned to ${keptFiles.length} files`);

@@ -1,73 +1,81 @@
-# Minimum Context Finder
+# mincontext
 
-Find the minimal set of files relevant to any task in a public GitHub repo. Copy the result into an AI tool (Claude, GPT-4, Cursor, etc.) with exactly the context it needs — nothing more.
+**Find the exact files you need for any task in any GitHub repo.**
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FYOUR_USERNAME%2Fmincontext)
+Instead of pasting an entire codebase into an AI assistant, mincontext analyzes the repo and returns only the files that matter for your specific task. The AI reads actual file contents and import graphs — not just filename keywords.
+
+---
 
 ## How it works
 
-1. Paste a GitHub repo URL or `owner/repo` into the input
-2. Describe what you're trying to build or fix (e.g. "add OAuth login")
-3. Click **Find Context**
+1. **Paste a GitHub repo** — any public repo, any language, any size
+2. **Describe your task** — "add rate limiting middleware", "implement OAuth login", "fix memory leak in event loop"
+3. **Get the exact files** — copy the GitHub links directly into Claude, ChatGPT, Cursor, or any AI tool
 
-The app will:
-- Fetch the repo's file tree via the GitHub REST API
-- Pre-filter noise (lock files, binaries, `node_modules`, etc.)
-- Fetch each file's content
-- Parse imports/exports/symbols with regex-based static analysis
-- Build a one-line summary per file
-- Run `Xenova/all-MiniLM-L6-v2` embeddings **in your browser** (no server)
-- Rank files by cosine similarity to your task description
-- Return the top 20 most relevant files
+---
 
-Then check/uncheck files and click **Copy Context** to get a formatted blob ready to paste into any AI tool.
+## Features
 
-## Key properties
+- **Reads actual code** — builds an import graph, then uses an LLM to evaluate candidates by reading file contents and exports
+- **Any language** — JavaScript, TypeScript, Python, Go, Rust, Ruby, Java, and more
+- **No false positives** — only returns files you would actually open to implement the task
+- **Fast** — tree fetch + parallel content fetch + single LLM call, typically under 15 seconds
+- **Your key, your quota** — add your free [Groq API key](https://console.groq.com) for higher accuracy and unlimited use
 
-- **Zero server cost** — embeddings and ranking run entirely in the browser via `@xenova/transformers` (ONNX/WASM)
-- **No auth required** — works with any public repo
-- **Optional GitHub PAT** — add a personal access token via the header button to avoid rate limits on large repos; stored only in `localStorage`
-- **No database, no accounts**
+---
 
-## Tech stack
-
-| Layer | Tech |
-|---|---|
-| Framework | Next.js 14 (App Router) |
-| Styling | Tailwind CSS |
-| Embeddings | `@xenova/transformers` — `all-MiniLM-L6-v2` |
-| Parsing | Regex-based static analysis (JS/TS/Py/Go/Rust/Ruby/Java) |
-| Data | GitHub REST API (unauthenticated) |
-| Hosting | Vercel free tier |
-
-## Local development
+## Self-hosting
 
 ```bash
+git clone https://github.com/your-username/mincontext
+cd mincontext
 npm install
-npm run dev
-# Open http://localhost:3000
 ```
 
-## Deploy to Vercel
+Create a `.env.local` file:
 
-Click the button above, or:
+```
+GROQ_API_KEY=gsk_your_key_here
+```
+
+Get a free key at [console.groq.com](https://console.groq.com) — no credit card required.
 
 ```bash
-npm i -g vercel
-vercel
+npm run dev
 ```
 
-No environment variables required for basic usage.
+Open [http://localhost:3000](http://localhost:3000).
 
-## URL structure
+---
+
+## Architecture
 
 ```
-mincontext.dev/                    → Landing page
-mincontext.dev/facebook/react      → Analyze facebook/react
-mincontext.dev/vercel/next.js      → Analyze vercel/next.js
+GitHub tree API
+  → filter noise (test files, build artifacts, docs)
+  → fetch all file contents in parallel
+  → parse imports/exports per file
+  → build import graph + BFS ordering (keyword-connected files first)
+  → LLM binary pruning: keep/remove per file
+  → sufficiency check: add back any missing critical files
+  → final file set with reasons
 ```
 
-Mirrors GitHub's URL structure so you can replace `github.com` with `mincontext.dev` in any repo URL.
+The LLM receives structured summaries — what each file exports, imports, and defines — not raw file dumps. This keeps token usage low and latency fast.
+
+**Models:**
+- Without API key: `llama-3.1-8b-instant` (Groq shared quota)
+- With your own API key: `llama-3.3-70b-versatile` (higher accuracy, your own quota)
+
+---
+
+## Stack
+
+- [Next.js 14](https://nextjs.org) — App Router, Edge Functions
+- [Groq](https://groq.com) — LLM inference
+- GitHub REST API — repo tree and raw file content
+
+---
 
 ## License
 
