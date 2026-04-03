@@ -27,6 +27,15 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env
+.env.*
+!.env.example
+
+# local backups
+*.bak
+
+# old build artifacts
+.next.old/
 
 # vercel
 .vercel

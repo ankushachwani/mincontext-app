@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Minimum Context Finder
 
-## Getting Started
+Find the minimal set of files relevant to any task in a public GitHub repo. Copy the result into an AI tool (Claude, GPT-4, Cursor, etc.) with exactly the context it needs — nothing more.
 
-First, run the development server:
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FYOUR_USERNAME%2Fmincontext)
+
+## How it works
+
+1. Paste a GitHub repo URL or `owner/repo` into the input
+2. Describe what you're trying to build or fix (e.g. "add OAuth login")
+3. Click **Find Context**
+
+The app will:
+- Fetch the repo's file tree via the GitHub REST API
+- Pre-filter noise (lock files, binaries, `node_modules`, etc.)
+- Fetch each file's content
+- Parse imports/exports/symbols with regex-based static analysis
+- Build a one-line summary per file
+- Run `Xenova/all-MiniLM-L6-v2` embeddings **in your browser** (no server)
+- Rank files by cosine similarity to your task description
+- Return the top 20 most relevant files
+
+Then check/uncheck files and click **Copy Context** to get a formatted blob ready to paste into any AI tool.
+
+## Key properties
+
+- **Zero server cost** — embeddings and ranking run entirely in the browser via `@xenova/transformers` (ONNX/WASM)
+- **No auth required** — works with any public repo
+- **Optional GitHub PAT** — add a personal access token via the header button to avoid rate limits on large repos; stored only in `localStorage`
+- **No database, no accounts**
+
+## Tech stack
+
+| Layer | Tech |
+|---|---|
+| Framework | Next.js 14 (App Router) |
+| Styling | Tailwind CSS |
+| Embeddings | `@xenova/transformers` — `all-MiniLM-L6-v2` |
+| Parsing | Regex-based static analysis (JS/TS/Py/Go/Rust/Ruby/Java) |
+| Data | GitHub REST API (unauthenticated) |
+| Hosting | Vercel free tier |
+
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Open http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Deploy to Vercel
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+Click the button above, or:
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+```bash
+npm i -g vercel
+vercel
+```
 
-## Learn More
+No environment variables required for basic usage.
 
-To learn more about Next.js, take a look at the following resources:
+## URL structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+mincontext.dev/                    → Landing page
+mincontext.dev/facebook/react      → Analyze facebook/react
+mincontext.dev/vercel/next.js      → Analyze vercel/next.js
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+Mirrors GitHub's URL structure so you can replace `github.com` with `mincontext.dev` in any repo URL.
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+MIT
