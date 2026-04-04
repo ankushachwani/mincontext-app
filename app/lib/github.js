@@ -53,6 +53,9 @@ const SKIP_FILENAME_PATTERNS = [
   /^Readme(\.(md|txt|rst))?$/i,
   // Standalone test/benchmark files by name
   /^(test|tests|spec|specs|benchmark|benchmarks|bench)\.(js|ts|py|rb|go|rs)$/i,
+  // Build / bundler configs — never needed to understand or modify source logic
+  /^(vite|vitest|tsdown|tsup|rollup|webpack|esbuild|swc|babel\.config|jest\.config|jest\.setup)\.(js|ts|mjs|cjs)$/,
+  /^(karma|nightwatch|cypress|playwright)\.config\.(js|ts)$/,
 ];
 
 // Tooling package directory patterns — skip these in pre-filter.

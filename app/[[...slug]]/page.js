@@ -8,7 +8,7 @@ import { extractKeywords } from "../lib/keywords";
 // embed is dynamically imported inside runAnalysis so webpack never
 // traces @xenova/transformers into the server bundle.
 
-const STEPS = ["Fetching tree", "Fetching files", "Analyzing", "Pruning with AI", "Verifying"];
+const STEPS = ["Fetching tree", "Fetching files", "Analyzing", "Narrowing down", "Verifying"];
 
 function useLocalStorage(key, defaultValue) {
   const [val, setVal] = useState(defaultValue);
@@ -122,49 +122,57 @@ function HomePage() {
         )}
       </div>
 
-      {/* Key notification — modal overlay, shows every visit when no key set */}
+      {/* Key notification — speech bubble anchored to the API key button */}
       {showKeyNotif && (
-        <div
-          onClick={() => setShowKeyNotif(false)}
-          style={{
-            position: "fixed", inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 50, padding: "1rem",
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-active)",
-              borderRadius: "10px",
-              padding: "1.5rem",
-              maxWidth: "380px", width: "100%",
-              boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "0.75rem" }}>
-              <span style={{ color: "var(--text-primary)", fontSize: "0.95rem", fontWeight: 700 }}>
-                Get better results
+        <div style={{
+          position: "fixed", top: "3.2rem", right: "1.25rem",
+          zIndex: 50,
+        }}>
+          {/* Tail pointing up-right toward the button */}
+          <div style={{
+            position: "absolute", top: "-7px", right: "18px",
+            width: 0, height: 0,
+            borderLeft: "7px solid transparent",
+            borderRight: "7px solid transparent",
+            borderBottom: "7px solid var(--border-active)",
+          }} />
+          <div style={{
+            position: "absolute", top: "-5px", right: "19px",
+            width: 0, height: 0,
+            borderLeft: "6px solid transparent",
+            borderRight: "6px solid transparent",
+            borderBottom: "6px solid var(--bg-secondary)",
+            zIndex: 1,
+          }} />
+          <div style={{
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-active)",
+            borderRadius: "10px",
+            padding: "1rem 1.1rem",
+            width: "270px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+              <span style={{ color: "var(--text-primary)", fontSize: "0.85rem", fontWeight: 700 }}>
+                Running on shared quota
               </span>
               <button
                 onClick={() => setShowKeyNotif(false)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "1.1rem", lineHeight: 1, padding: 0, marginLeft: "1rem" }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "1rem", lineHeight: 1, padding: 0, marginLeft: "0.75rem" }}
               >
                 ×
               </button>
             </div>
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.82rem", lineHeight: 1.6, margin: "0 0 1.1rem" }}>
-              Add your free Groq API key to unlock higher-accuracy results using a smarter model. Takes 2 minutes — no credit card needed.
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.78rem", lineHeight: 1.6, margin: "0 0 0.85rem" }}>
+              It works — but results are sharper with your own key. Groq is free, takes 2 minutes to set up, no card needed.
             </p>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ display: "flex", gap: "0.4rem" }}>
               <button
                 onClick={() => { setShowKeyNotif(false); setShowKeyInput(true); }}
                 style={{
                   flex: 1,
-                  background: "var(--accent)", border: "none", borderRadius: "6px",
-                  color: "#fff", fontSize: "0.82rem", padding: "0.55rem 1rem",
+                  background: "var(--accent)", border: "none", borderRadius: "5px",
+                  color: "#fff", fontSize: "0.78rem", padding: "0.45rem 0.75rem",
                   cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
                 }}
               >
@@ -173,12 +181,12 @@ function HomePage() {
               <button
                 onClick={() => setShowKeyNotif(false)}
                 style={{
-                  background: "none", border: "1px solid var(--border)", borderRadius: "6px",
-                  color: "var(--text-muted)", fontSize: "0.82rem", padding: "0.55rem 1rem",
+                  background: "none", border: "1px solid var(--border)", borderRadius: "5px",
+                  color: "var(--text-muted)", fontSize: "0.78rem", padding: "0.45rem 0.75rem",
                   cursor: "pointer", fontFamily: "inherit",
                 }}
               >
-                Maybe later
+                Not now
               </button>
             </div>
           </div>
@@ -195,7 +203,7 @@ function HomePage() {
             Minimum Context Finder
           </h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: "0.6rem", lineHeight: 1.6, maxWidth: "420px" }}>
-            Find the exact files you need for any task in any public GitHub repo. AI reads the actual code — not just keywords. Paste the links into Claude, ChatGPT, or Cursor.
+            Paste a GitHub repo, describe what you&apos;re building. Get back the exact files worth reading — nothing more.
           </p>
         </div>
 
@@ -338,7 +346,7 @@ export default function RepoPage({ params }) {
         includedForLLM.push(f);
       }
 
-      setStepDetail(`Asking AI to evaluate ${includedForLLM.length} candidates...`);
+      setStepDetail(`Reviewing ${includedForLLM.length} candidates...`);
 
       const llmHeaders = { "Content-Type": "application/json", ...(groqKey ? { "x-groq-key": groqKey } : {}) };
 
@@ -387,7 +395,15 @@ ${fileDescriptions}`,
 
       if (!pruneRes.ok) {
         const errBody = await pruneRes.json().catch(() => ({}));
-        throw new Error(errBody.error?.message || `LLM API error ${pruneRes.status}`);
+        const rawMsg = errBody.error?.message || "";
+        if (pruneRes.status === 429) {
+          throw new Error(
+            groqKey
+              ? "Your Groq API key has reached its rate limit. Please wait a moment and try again."
+              : "The shared inference quota is temporarily exhausted. Add your own free Groq API key (top right) to continue without interruption."
+          );
+        }
+        throw new Error(rawMsg || `LLM API error ${pruneRes.status}`);
       }
       const pruneData = await pruneRes.json();
       if (abortRef.current) return;
@@ -403,8 +419,8 @@ ${fileDescriptions}`,
       }
 
       const keptSet = new Set(pruneResults.filter(r => !r.removable).map(r => r.file));
-      // Safety: if LLM removed too many, keep all
-      if (keptSet.size < 3) includedForLLM.forEach(f => keptSet.add(f.path));
+      // Safety: only restore if LLM kept literally nothing (sufficiency check handles the rest)
+      if (keptSet.size < 1) includedForLLM.forEach(f => keptSet.add(f.path));
 
       const keptFiles = ordered.filter(f => keptSet.has(f.path));
       setStepDetail(`Pruned to ${keptFiles.length} files`);
