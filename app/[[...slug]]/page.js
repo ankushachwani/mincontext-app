@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { fetchFileTree, fetchMultipleFiles } from "../lib/github";
 import { parseFile } from "../lib/parse";
 import { extractKeywords } from "../lib/keywords";
@@ -32,6 +32,11 @@ function HomePage() {
   const [groqKey, setGroqKey] = useLocalStorage("groq_key", "");
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [showKeyNotif, setShowKeyNotif] = useState(false);
+  const [keyCopied, setKeyCopied] = useState(false);
+  const [draftKey, setDraftKey] = useState("");
+  const [keyAction, setKeyAction] = useState(null); // null | 'saved' | 'removed'
+
+  useEffect(() => { if (showKeyInput) { setDraftKey(groqKey); setKeyAction(null); } }, [showKeyInput]);
 
   // Show the key notification on every page visit if no key is set
   useEffect(() => {
@@ -57,10 +62,10 @@ function HomePage() {
   }
 
   const examples = [
-    { label: "vercel/next.js", path: "/vercel/next.js" },
-    { label: "expressjs/express", path: "/expressjs/express" },
-    { label: "koajs/koa", path: "/koajs/koa" },
-    { label: "gin-gonic/gin", path: "/gin-gonic/gin" },
+    { label: "expressjs/express", path: "/expressjs/express", task: "add error handling middleware" },
+    { label: "gin-gonic/gin",     path: "/gin-gonic/gin",     task: "add custom middleware" },
+    { label: "reduxjs/redux",     path: "/reduxjs/redux",     task: "add logging middleware" },
+    { label: "pallets/flask",     path: "/pallets/flask",     task: "add a before_request hook" },
   ];
 
   return (
@@ -97,25 +102,68 @@ function HomePage() {
               <a href="https://console.groq.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", cursor: "pointer" }}>console.groq.com</a>
               . Stored in your browser only.
             </div>
-            <input
-              type="password"
-              value={groqKey}
-              onChange={e => { setGroqKey(e.target.value); if (e.target.value) setNotifDismissed("1"); }}
-              placeholder="gsk_..."
-              autoFocus
-              style={{
-                width: "100%", boxSizing: "border-box",
-                background: "var(--bg)", border: "1px solid var(--border-active)",
-                borderRadius: "5px", color: "var(--text-primary)", padding: "0.45rem 0.6rem",
-                fontSize: "0.82rem", fontFamily: "inherit", outline: "none",
-              }}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.6rem" }}>
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <input
+                type="password"
+                value={draftKey}
+                onChange={e => setDraftKey(e.target.value)}
+                placeholder="gsk_..."
+                autoFocus
+                style={{
+                  width: "100%", boxSizing: "border-box",
+                  background: "var(--bg)", border: "1px solid var(--border-active)",
+                  borderRadius: "5px", color: "var(--text-primary)", padding: "0.45rem 2rem 0.45rem 0.6rem",
+                  fontSize: "0.82rem", fontFamily: "inherit", outline: "none",
+                }}
+              />
+              {draftKey && (
+                <button
+                  onClick={() => { navigator.clipboard.writeText(draftKey); setKeyCopied(true); setTimeout(() => setKeyCopied(false), 1500); }}
+                  title="Copy key"
+                  style={{
+                    position: "absolute", right: "0.4rem",
+                    background: "none", border: "none", cursor: "pointer",
+                    color: keyCopied ? "var(--success)" : "var(--text-muted)", padding: "0.1rem", display: "flex", alignItems: "center",
+                    transition: "color 0.15s",
+                  }}
+                >
+                  {keyCopied ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  )}
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.6rem", gap: "0.5rem" }}>
+              {groqKey && (
+                <button
+                  onClick={() => { setKeyAction("removed"); setGroqKey(""); setDraftKey(""); setTimeout(() => setShowKeyInput(false), 700); }}
+                  style={{
+                    background: "none", border: `1px solid ${keyAction === "removed" ? "var(--error, #ef4444)" : "var(--border)"}`,
+                    borderRadius: "4px", color: keyAction === "removed" ? "var(--error, #ef4444)" : "var(--text-muted)",
+                    fontSize: "0.78rem", padding: "0.3rem 0.75rem", cursor: "pointer", fontFamily: "inherit",
+                    transition: "color 0.15s, border-color 0.15s",
+                  }}
+                >
+                  {keyAction === "removed" ? "Removed ✓" : "Remove key"}
+                </button>
+              )}
               <button
-                onClick={() => setShowKeyInput(false)}
-                style={{ background: "var(--accent)", border: "none", borderRadius: "4px", color: "#fff", fontSize: "0.78rem", padding: "0.3rem 0.75rem", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                onClick={() => { setKeyAction("saved"); setGroqKey(draftKey); setTimeout(() => setShowKeyInput(false), 700); }}
+                style={{
+                  background: keyAction === "saved" ? "var(--success)" : "var(--accent)",
+                  border: "none", borderRadius: "4px", color: "#fff", fontSize: "0.78rem",
+                  padding: "0.3rem 0.75rem", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, marginLeft: "auto",
+                  transition: "background 0.15s",
+                }}
               >
-                Save
+                {keyAction === "saved" ? "Saved ✓" : "Save"}
               </button>
             </div>
           </div>
@@ -230,7 +278,7 @@ function HomePage() {
         <div style={{ marginTop: "1.25rem", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.4rem" }}>
           <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>try:</span>
           {examples.map((ex) => (
-            <button key={ex.label} onClick={() => router.push(ex.path)} style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text-secondary)", fontSize: "0.78rem", padding: "0.2rem 0.55rem", cursor: "pointer", fontFamily: "inherit" }}>
+            <button key={ex.label} onClick={() => router.push(`${ex.path}?task=${encodeURIComponent(ex.task)}`)} style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text-secondary)", fontSize: "0.78rem", padding: "0.2rem 0.55rem", cursor: "pointer", fontFamily: "inherit" }}>
               {ex.label}
             </button>
           ))}
@@ -253,8 +301,32 @@ function HomePage() {
   );
 }
 
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function cacheKey(owner, repo, task) {
+  return `mc_${owner}/${repo}/${task.toLowerCase().trim()}`;
+}
+
+function loadCache(owner, repo, task) {
+  try {
+    const raw = localStorage.getItem(cacheKey(owner, repo, task));
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) { localStorage.removeItem(cacheKey(owner, repo, task)); return null; }
+    return data;
+  } catch { return null; }
+}
+
+function saveCache(owner, repo, task, data) {
+  try {
+    localStorage.setItem(cacheKey(owner, repo, task), JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+}
+
 export default function RepoPage({ params }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const slug = params?.slug || [];
 
   const owner = slug[0];
@@ -269,29 +341,84 @@ export default function RepoPage({ params }) {
   const [selected, setSelected] = useState(new Set());
   const [error, setError] = useState("");
   const [modelStatus, setModelStatus] = useState("");
+  const [largeRepoWarning, setLargeRepoWarning] = useState("");
+  const [ranTask, setRanTask] = useState(""); // task that produced current results
+  const [fromCache, setFromCache] = useState(false);
   const [groqKey, setGroqKeyState] = useLocalStorage("groq_key", "");
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyCopied, setKeyCopied] = useState(false);
+  const [draftKey, setDraftKey] = useState("");
+  const [keyAction, setKeyAction] = useState(null); // null | 'saved' | 'removed'
   const abortRef = useRef(false);
+
+  useEffect(() => { if (showKeyInput) { setDraftKey(groqKey); setKeyAction(null); } }, [showKeyInput]);
+  const taskInputRef = useRef(null);
+
+  // Auto-populate task from URL on mount — results only shown after user clicks Find Context
+  useEffect(() => {
+    const urlTask = searchParams.get("task");
+    if (urlTask && owner && repo) {
+      setTask(urlTask);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (isHomePage) return <HomePage />;
 
-  async function runAnalysis() {
-    if (!task.trim()) return;
+  async function runAnalysis(taskOverride) {
+    const t = (taskOverride ?? task).trim();
+    if (!t) return;
+
+    // Check cache — play through steps animation before revealing
+    const cached = loadCache(owner, repo, t);
+    if (cached) {
+      setTask(t);
+      setFromCache(true);
+      setStatus("running");
+      setStep(0); setStepDetail("Reading file tree...");
+      window.history.replaceState(null, "", `/${owner}/${repo}?task=${encodeURIComponent(t)}`);
+      await new Promise(r => setTimeout(r, 300));
+      setStep(1); setStepDetail(`${cached.length} files fetched`);
+      await new Promise(r => setTimeout(r, 300));
+      setStep(2); setStepDetail("Building import graph...");
+      await new Promise(r => setTimeout(r, 300));
+      setStep(3); setStepDetail(`Reviewing ${cached.length} candidates...`);
+      await new Promise(r => setTimeout(r, 300));
+      setStep(4); setStepDetail("Verifying completeness...");
+      await new Promise(r => setTimeout(r, 250));
+      setResults(cached);
+      setSelected(new Set(cached.map(r => r.path)));
+      setRanTask(t);
+      setStatus("done");
+      return;
+    }
+
     abortRef.current = false;
     setStatus("running");
     setStep(0);
     setStepDetail("");
     setResults([]);
     setError("");
+    setLargeRepoWarning("");
+    setFromCache(false);
+    setTask(t);
+    window.history.replaceState(null, "", `/${owner}/${repo}?task=${encodeURIComponent(t)}`);
 
-    const keywords = extractKeywords(task);
+    // Read key directly from localStorage to avoid stale closure on auto-run
+    const activeKey = groqKey || (typeof window !== "undefined" ? localStorage.getItem("groq_key") || "" : "");
+
+    const keywords = extractKeywords(t);
 
     try {
       // ── Step 0: Fetch file tree (IDF pre-filter) ─────────────────────────
       setStep(0);
-      setStepDetail(`GET /repos/${owner}/${repo}/git/trees/HEAD`);
+      setStepDetail("Reading file tree...");
       const { files: treeFiles, meta } = await fetchFileTree(owner, repo, null, keywords);
       if (abortRef.current) return;
+
+      if (meta.totalInRepo > 5000) {
+        setLargeRepoWarning(`Large repository (${meta.totalInRepo.toLocaleString()} files) — this may take additional time.`);
+      }
 
       // ── Step 1: Fetch all file contents ──────────────────────────────────
       setStep(1);
@@ -348,7 +475,7 @@ export default function RepoPage({ params }) {
 
       setStepDetail(`Reviewing ${includedForLLM.length} candidates...`);
 
-      const llmHeaders = { "Content-Type": "application/json", ...(groqKey ? { "x-groq-key": groqKey } : {}) };
+      const llmHeaders = { "Content-Type": "application/json", ...(activeKey ? { "x-groq-key": activeKey } : {}) };
 
       const pruneRes = await fetch("/api/llm", {
         method: "POST",
@@ -398,7 +525,7 @@ ${fileDescriptions}`,
         const rawMsg = errBody.error?.message || "";
         if (pruneRes.status === 429) {
           throw new Error(
-            groqKey
+            activeKey
               ? "Your Groq API key has reached its rate limit. Please wait a moment and try again."
               : "The shared inference quota is temporarily exhausted. Add your own free Groq API key (top right) to continue without interruption."
           );
@@ -498,8 +625,10 @@ ${allAvailablePaths}`,
           reason: reasonMap.get(f.path) || f.summary,
         }));
 
+      saveCache(owner, repo, t, finalResults);
       setResults(finalResults);
       setSelected(new Set(finalResults.map(r => r.path)));
+      setRanTask(t);
       setStatus("done");
     } catch (err) {
       setError(err.message || "Something went wrong");
@@ -520,7 +649,7 @@ ${allAvailablePaths}`,
     const links = results
       .filter(r => selected.has(r.path))
       .map(r => `https://github.com/${owner}/${repo}/blob/HEAD/${r.path}`)
-      .join("\n");
+      .join("\n") + "\n";
     navigator.clipboard.writeText(links).catch(() => {});
   }
 
@@ -572,7 +701,7 @@ ${allAvailablePaths}`,
           }}
           title="Add your free Groq API key for unlimited usage"
         >
-          {groqKey ? "● key set" : "API key"}
+          {groqKey ? "● API key set" : "API key"}
         </button>
       </header>
 
@@ -584,29 +713,97 @@ ${allAvailablePaths}`,
           display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap",
         }}>
           <span style={{ color: "var(--text-secondary)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>Groq API key:</span>
-          <input
-            type="password"
-            value={groqKey}
-            onChange={e => setGroqKeyState(e.target.value)}
-            placeholder="gsk_..."
-            style={{
-              flex: 1, maxWidth: "380px",
-              background: "var(--bg-secondary)", border: "1px solid var(--border-active)",
-              borderRadius: "4px", color: "var(--text-primary)", padding: "0.35rem 0.6rem",
-              fontSize: "0.8rem", fontFamily: "inherit", outline: "none",
-            }}
-          />
+          <div style={{ position: "relative", display: "flex", alignItems: "center", flex: 1, maxWidth: "380px" }}>
+            <input
+              type="password"
+              value={draftKey}
+              onChange={e => setDraftKey(e.target.value)}
+              placeholder="gsk_..."
+              style={{
+                width: "100%", boxSizing: "border-box",
+                background: "var(--bg-secondary)", border: "1px solid var(--border-active)",
+                borderRadius: "4px", color: "var(--text-primary)", padding: "0.35rem 2rem 0.35rem 0.6rem",
+                fontSize: "0.8rem", fontFamily: "inherit", outline: "none",
+              }}
+            />
+            {draftKey && (
+              <button
+                onClick={() => { navigator.clipboard.writeText(draftKey); setKeyCopied(true); setTimeout(() => setKeyCopied(false), 1500); }}
+                title="Copy key"
+                style={{
+                  position: "absolute", right: "0.4rem",
+                  background: "none", border: "none", cursor: "pointer",
+                  color: keyCopied ? "var(--success)" : "var(--text-muted)", padding: "0.1rem", display: "flex", alignItems: "center",
+                  transition: "color 0.15s",
+                }}
+              >
+                {keyCopied ? (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                )}
+              </button>
+            )}
+          </div>
           <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
             Free at{" "}
             <a href="https://console.groq.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>console.groq.com</a>
             {" "}— stored only in your browser, never sent to our servers.
           </span>
+          {groqKey && (
+            <button
+              onClick={() => { setKeyAction("removed"); setGroqKeyState(""); setDraftKey(""); setTimeout(() => setShowKeyInput(false), 700); }}
+              style={{
+                background: "none", border: `1px solid ${keyAction === "removed" ? "var(--error, #ef4444)" : "var(--border)"}`,
+                borderRadius: "4px", cursor: "pointer",
+                color: keyAction === "removed" ? "var(--error, #ef4444)" : "var(--text-muted)",
+                fontSize: "0.75rem", padding: "0.2rem 0.5rem", fontFamily: "inherit", whiteSpace: "nowrap",
+                transition: "color 0.15s, border-color 0.15s",
+              }}
+            >{keyAction === "removed" ? "Removed ✓" : "Remove key"}</button>
+          )}
+          <button
+            onClick={() => { setKeyAction("saved"); setGroqKeyState(draftKey); setTimeout(() => setShowKeyInput(false), 700); }}
+            style={{
+              background: keyAction === "saved" ? "var(--success)" : "var(--accent)",
+              border: "none", borderRadius: "4px", color: "#fff",
+              fontSize: "0.75rem", padding: "0.2rem 0.6rem", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap",
+              transition: "background 0.15s",
+            }}
+          >{keyAction === "saved" ? "Saved ✓" : "Save"}</button>
           <button onClick={() => setShowKeyInput(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "1rem", padding: "0 0.25rem" }}>×</button>
         </div>
       )}
 
       {/* Main content */}
       <div style={{ flex: 1, maxWidth: "860px", width: "100%", margin: "0 auto", padding: "2rem 1.5rem" }}>
+
+        {/* Contextual nav — below header */}
+        {status !== "running" && (
+          <div style={{ marginBottom: "1.25rem" }}>
+            {status === "done" && results.length > 0 ? (
+              <button
+                onClick={() => { setStatus(null); setResults([]); setRanTask(""); setTimeout(() => taskInputRef.current?.focus(), 50); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: "0.82rem", fontFamily: "inherit", padding: 0 }}
+              >
+                ← new task
+              </button>
+            ) : (
+              <button
+                onClick={() => router.push("/")}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: "0.82rem", fontFamily: "inherit", padding: 0 }}
+              >
+                ← new repo
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Task input */}
         <div style={{ marginBottom: "1.5rem" }}>
           <label style={{ display: "block", color: "var(--text-muted)", fontSize: "0.78rem", marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -614,6 +811,7 @@ ${allAvailablePaths}`,
           </label>
           <div style={{ display: "flex", gap: "0.75rem" }}>
             <input
+              ref={taskInputRef}
               type="text"
               value={task}
               onChange={e => setTask(e.target.value)}
@@ -634,7 +832,7 @@ ${allAvailablePaths}`,
               }}
             />
             <button
-              onClick={runAnalysis}
+              onClick={() => runAnalysis()}
               disabled={status === "running" || !task.trim()}
               style={{
                 padding: "0.75rem 1.5rem",
@@ -660,38 +858,42 @@ ${allAvailablePaths}`,
           <ProgressIndicator step={step} steps={STEPS} detail={stepDetail} modelStatus={modelStatus} />
         )}
 
+        {/* Large repo warning */}
+        {largeRepoWarning && status === "running" && (
+          <div style={{
+            padding: "0.6rem 1rem", background: "rgba(234,179,8,0.08)",
+            border: "1px solid rgba(234,179,8,0.3)", borderRadius: "6px",
+            color: "rgb(234,179,8)", fontSize: "0.8rem", marginBottom: "1rem",
+          }}>
+            {largeRepoWarning}
+          </div>
+        )}
+
         {/* Error */}
         {status === "error" && error && (
           <div style={{
-            padding: "1rem",
-            background: "#1a0a0a",
-            border: "1px solid var(--error)",
-            borderRadius: "6px",
-            color: "var(--error)",
-            fontSize: "0.85rem",
-            marginBottom: "1.5rem",
+            padding: "1rem", background: "#1a0a0a",
+            border: "1px solid var(--error)", borderRadius: "6px",
+            color: "var(--error)", fontSize: "0.85rem", marginBottom: "1.5rem",
           }}>
             <strong>Error:</strong> {error}
-            {error.includes("rate limit") || error.includes("403") ? (
-              <span style={{ color: "var(--text-secondary)", display: "block", marginTop: "0.4rem" }}>
-                Try adding a GitHub Personal Access Token via the PAT button in the header.
-              </span>
-            ) : null}
           </div>
         )}
 
         {/* Results */}
         {status === "done" && results.length > 0 && (
-          <Results
-            results={results}
-            selected={selected}
-            toggle={toggleSelected}
-            onCopy={copyLinks}
-            totalTokens={totalTokens}
-            owner={owner}
-            repo={repo}
-            task={task}
-          />
+          <>
+            <Results
+              results={results}
+              selected={selected}
+              toggle={toggleSelected}
+              onCopy={copyLinks}
+              totalTokens={totalTokens}
+              owner={owner}
+              repo={repo}
+              task={ranTask}
+            />
+          </>
         )}
 
         {/* Idle state hint */}
@@ -707,7 +909,7 @@ ${allAvailablePaths}`,
               Describe the task you&apos;re working on, then click <strong style={{ color: "var(--text-secondary)" }}>Find Context</strong>.
             </div>
             <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>
-              The app fetches the repo file tree, builds an import graph, then uses AI to return only the files you actually need.
+              Fetches the repo file tree, builds an import graph, then returns only the files you actually need.
             </div>
           </div>
         )}
@@ -804,11 +1006,19 @@ function Spinner() {
 
 function Results({ results, selected, toggle, onCopy, totalTokens, owner, repo, task }) {
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
 
   function handleCopy() {
     onCopy();
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
+  }
+
+  function handleShare() {
+    const url = typeof window !== "undefined" ? window.location.href : "";
+    navigator.clipboard.writeText(url).catch(() => {});
+    setShared(true);
+    setTimeout(() => setShared(false), 1800);
   }
 
   return (
@@ -849,7 +1059,24 @@ function Results({ results, selected, toggle, onCopy, totalTokens, owner, repo, 
               transition: "all 0.2s",
             }}
           >
-            {copied ? "✓ Copied!" : `Copy Links (${selected.size})`}
+            {copied ? "✓ Copied!" : `Copy links (${selected.size})`}
+          </button>
+          <button
+            onClick={handleShare}
+            style={{
+              padding: "0.5rem 1.1rem",
+              background: shared ? "var(--success)" : "var(--bg-tertiary)",
+              border: `1px solid ${shared ? "var(--success)" : "var(--border-active)"}`,
+              borderRadius: "5px",
+              color: shared ? "#fff" : "var(--text-primary)",
+              fontSize: "0.82rem",
+              fontFamily: "inherit",
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {shared ? "✓ Copied!" : "Share"}
           </button>
         </div>
       </div>

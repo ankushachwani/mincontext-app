@@ -187,6 +187,8 @@ export async function fetchFileTree(owner, repo, token, keywords = []) {
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    if (res.status === 404) throw new Error(`Repository not found. Check that "${owner}/${repo}" exists and is public.`);
+    if (res.status === 401 || res.status === 403) throw new Error(`Access denied. "${owner}/${repo}" may be a private repository.`);
     throw new Error(body.message || `GitHub API error: ${res.status}`);
   }
 
