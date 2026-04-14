@@ -1,12 +1,65 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { fetchFileTree, fetchMultipleFiles } from "../lib/github";
 import { parseFile } from "../lib/parse";
-import { extractKeywords } from "../lib/keywords";
+import { extractKeywords, contentMatchScore, pathMatchScore } from "../lib/keywords";
 // embed is dynamically imported inside runAnalysis so webpack never
 // traces @xenova/transformers into the server bundle.
+
+// ── Head-scored content match (first N lines only) ────────────────────────────
+// Large files declare their purpose at the top (imports, type signatures).
+// Full-file TF scoring dilutes this signal; head scoring is more discriminating.
+function contentScoreHead(content, keywords, lines = 50) {
+  return contentMatchScore(content.split("\n").slice(0, lines).join("\n"), keywords);
+}
+
+// ── Structural role detection ─────────────────────────────────────────────────
+// Annotates each file with its structural role (base class, trait, interface, etc.)
+// so the LLM sees relationship context beyond the filename and summary.
+function detectRole(filePath, content) {
+  const head = content.slice(0, 1200);
+  const ext = filePath.split(".").pop().toLowerCase();
+  const roles = [];
+  if (ext === "py") {
+    const inherit = head.match(/^class\s+\w+\s*\(([^)]+)\)/m);
+    if (inherit) roles.push(`[inherits: ${inherit[1].trim()}]`);
+    const deco = [...head.matchAll(/@\w+\.(before_request|after_request|route|errorhandler)/g)];
+    if (deco.length) roles.push(`[defines: ${[...new Set(deco.map(m => m[1]))].join(", ")}]`);
+  } else if (ext === "rb") {
+    const inherit = head.match(/class\s+\w+\s*<\s*(\S+)/);
+    if (inherit) roles.push(`[inherits: ${inherit[1]}]`);
+    const inc = head.match(/^\s+include\s+(\w[\w:]*)/m);
+    if (inc) roles.push(`[includes: ${inc[1]}]`);
+  } else if (ext === "rs") {
+    const impls = [...head.matchAll(/impl\s+([\w:]+)\s+for\s+(\w+)/g)];
+    if (impls.length) roles.push(`[implements: ${impls.slice(0,3).map(m => `${m[1]} for ${m[2]}`).join(", ")}]`);
+    const trait = head.match(/^pub\s+trait\s+(\w+)/m);
+    if (trait) roles.push(`[trait: ${trait[1]}]`);
+  } else if (ext === "go") {
+    const iface = head.match(/type\s+(\w+)\s+interface\s*\{/);
+    if (iface) roles.push(`[interface: ${iface[1]}]`);
+  } else if (["ts", "tsx", "js", "jsx"].includes(ext)) {
+    const ext2 = head.match(/class\s+\w+\s+extends\s+(\w+)/);
+    if (ext2) roles.push(`[extends: ${ext2[1]}]`);
+  } else if (ext === "php") {
+    const inherit = head.match(/class\s+\w+\s+extends\s+(\w+)/);
+    if (inherit) roles.push(`[extends: ${inherit[1]}]`);
+    const impl = head.match(/implements\s+([\w\\,\s]+)/);
+    if (impl) roles.push(`[implements: ${impl[1].trim().split(/[\s,]+/).slice(0,2).join(", ")}]`);
+  }
+  return roles.join(" ");
+}
+
+// ── Registration/entry file detection ────────────────────────────────────────
+// Wiring files (app.go, application.js, Kernel.php…) register features in the
+// framework. The sufficiency check can add them without a citation because
+// kept files don't import them — it's the other way around.
+function isRegistrationFile(filePath) {
+  const name = filePath.split("/").pop().replace(/\.[^.]+$/, "").toLowerCase();
+  return ["app", "application", "main", "server", "kernel", "bootstrap", "init"].includes(name);
+}
 
 const STEPS = ["Fetching tree", "Fetching files", "Analyzing", "Narrowing down", "Verifying"];
 
@@ -202,7 +255,7 @@ function HomePage() {
           }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "0.5rem" }}>
               <span style={{ color: "var(--text-primary)", fontSize: "0.85rem", fontWeight: 700 }}>
-                Running on shared quota
+                API key required
               </span>
               <button
                 onClick={() => setShowKeyNotif(false)}
@@ -212,7 +265,7 @@ function HomePage() {
               </button>
             </div>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.78rem", lineHeight: 1.6, margin: "0 0 0.85rem" }}>
-              It works — but results are sharper with your own key. Groq is free, takes 2 minutes to set up, no card needed.
+              A free Groq API key is required to run analyses. Takes 2 minutes to set up, no card needed.
             </p>
             <div style={{ display: "flex", gap: "0.4rem" }}>
               <button
@@ -225,16 +278,6 @@ function HomePage() {
                 }}
               >
                 Add key →
-              </button>
-              <button
-                onClick={() => setShowKeyNotif(false)}
-                style={{
-                  background: "none", border: "1px solid var(--border)", borderRadius: "5px",
-                  color: "var(--text-muted)", fontSize: "0.78rem", padding: "0.45rem 0.75rem",
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                Not now
               </button>
             </div>
           </div>
@@ -286,7 +329,7 @@ function HomePage() {
 
         <div style={{ marginTop: "3rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
           {[
-            { label: "Reads actual code", desc: "AI analyzes file contents and imports — not just filename keywords." },
+            { label: "Import-aware", desc: "Builds a real import graph across the repo — connected files surface together." },
             { label: "Any language", desc: "JavaScript, TypeScript, Python, Go, Rust, Ruby, Java, and more." },
             { label: "Built for AI tools", desc: "Copy file links directly into Claude, ChatGPT, Cursor, or any AI assistant." },
           ].map(({ label, desc }) => (
@@ -326,7 +369,6 @@ function saveCache(owner, repo, task, data) {
 
 export default function RepoPage({ params }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const slug = params?.slug || [];
 
   const owner = slug[0];
@@ -342,6 +384,7 @@ export default function RepoPage({ params }) {
   const [error, setError] = useState("");
   const [modelStatus, setModelStatus] = useState("");
   const [largeRepoWarning, setLargeRepoWarning] = useState("");
+  const [repoTotalFiles, setRepoTotalFiles] = useState(0);
   const [ranTask, setRanTask] = useState(""); // task that produced current results
   const [fromCache, setFromCache] = useState(false);
   const [groqKey, setGroqKeyState] = useLocalStorage("groq_key", "");
@@ -354,23 +397,57 @@ export default function RepoPage({ params }) {
   useEffect(() => { if (showKeyInput) { setDraftKey(groqKey); setKeyAction(null); } }, [showKeyInput]);
   const taskInputRef = useRef(null);
 
-  // Auto-populate task from URL on mount — results only shown after user clicks Find Context
+  // On mount: read task from URL and pre-fill the input.
+  // Avoids useSearchParams which causes a hydration mismatch in Next.js 14.
   useEffect(() => {
-    const urlTask = searchParams.get("task");
-    if (urlTask && owner && repo) {
-      setTask(urlTask);
-    }
+    if (!owner || !repo) return;
+    const urlTask = new URLSearchParams(window.location.search).get("task");
+    if (urlTask) setTask(urlTask);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (isHomePage) return <HomePage />;
+
+  async function checkServerCache(owner, repo, task) {
+    try {
+      const k = `${owner}/${repo}/${task}`;
+      const res = await fetch(`/api/cache?k=${encodeURIComponent(k)}`);
+      if (!res.ok) return null;
+      const { files } = await res.json() || {};
+      if (!Array.isArray(files) || !files.length) return null;
+      // Re-fetch content from GitHub (fast: 3-4 files in parallel)
+      const contentMap = await fetchMultipleFiles(owner, repo, files.map(f => f.path));
+      const { parseFile } = await import("../lib/parse");
+      return files
+        .filter(f => contentMap.get(f.path) != null)
+        .map(f => ({
+          path: f.path,
+          content: contentMap.get(f.path) || "",
+          summary: f.path,
+          reason: f.reason || "",
+          ...parseFile(f.path, contentMap.get(f.path) || ""),
+        }));
+    } catch { return null; }
+  }
+
+  function storeServerCache(owner, repo, task, finalResults) {
+    const k = `${owner}/${repo}/${task}`;
+    fetch("/api/cache", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: k,
+        files: finalResults.map(f => ({ path: f.path, reason: f.reason })),
+      }),
+    }).catch(() => {});
+  }
 
   async function runAnalysis(taskOverride) {
     const t = (taskOverride ?? task).trim();
     if (!t) return;
 
     // Check cache — play through steps animation before revealing
-    const cached = loadCache(owner, repo, t);
+    const cached = loadCache(owner, repo, t) || await checkServerCache(owner, repo, t);
     if (cached) {
       setTask(t);
       setFromCache(true);
@@ -407,15 +484,22 @@ export default function RepoPage({ params }) {
     // Read key directly from localStorage to avoid stale closure on auto-run
     const activeKey = groqKey || (typeof window !== "undefined" ? localStorage.getItem("groq_key") || "" : "");
 
+    // Require an API key — shared quota uses a model too small for accurate results
+    if (!activeKey) {
+      setShowKeyInput(true);
+      return;
+    }
+
     const keywords = extractKeywords(t);
 
     try {
       // ── Step 0: Fetch file tree (IDF pre-filter) ─────────────────────────
       setStep(0);
       setStepDetail("Reading file tree...");
-      const { files: treeFiles, meta } = await fetchFileTree(owner, repo, null, keywords);
+      const { files: treeFiles, allFilteredPaths, meta } = await fetchFileTree(owner, repo, null, keywords);
       if (abortRef.current) return;
 
+      setRepoTotalFiles(meta.totalInRepo);
       if (meta.totalInRepo > 5000) {
         setLargeRepoWarning(`Large repository (${meta.totalInRepo.toLocaleString()} files) — this may take additional time.`);
       }
@@ -423,17 +507,77 @@ export default function RepoPage({ params }) {
       // ── Step 1: Fetch all file contents ──────────────────────────────────
       setStep(1);
       const fetchedContent = new Map();
-      const allPaths = treeFiles.map(f => f.path);
-      const contentMap = await fetchMultipleFiles(owner, repo, allPaths,
+      const candidatePaths = treeFiles.map(f => f.path);
+      const contentMap = await fetchMultipleFiles(owner, repo, candidatePaths,
         (done, total) => setStepDetail(`${done}/${total} files fetched`)
       );
       for (const [k, v] of contentMap) fetchedContent.set(k, v);
+      if (abortRef.current) return;
+
+      // ── Content rescue pass ───────────────────────────────────────────────
+      // After IDF path-scoring selects ~80 candidates, some high-value files
+      // get cut because they have generic names (e.g. handlers/base.py for a
+      // middleware task). Rescue: fetch content for a smart sample of cut files,
+      // score by keyword density, and swap the weakest candidates for any
+      // cut files that score significantly higher.
+      if (keywords.length > 0 && allFilteredPaths.length > candidatePaths.length) {
+        const RESCUE_SOURCE_EXTS = new Set(['.py','.go','.rs','.rb','.js','.ts','.jsx','.tsx','.java','.kt','.c','.cpp','.cs','.swift','.php','.vue','.svelte']);
+        const RESCUE_CORE_DIRS   = new Set(['src','lib','pkg','core','internal','app','source','main','handler','handlers','middleware','router','routing','dispatch']);
+        // v6: filter dialect/generated/vendor noise from rescue candidates
+        const RESCUE_NOISE = [/\/dialects?\//i, /\/generated\//i, /\/vendor\//i];
+        const isRescuable = p =>
+          RESCUE_SOURCE_EXTS.has('.' + p.split('.').pop().toLowerCase()) &&
+          !RESCUE_NOISE.some(r => r.test(p));
+
+        const selectedSet = new Set(candidatePaths);
+        const cutPaths    = allFilteredPaths.filter(p => !selectedSet.has(p));
+        const validCut    = cutPaths.filter(isRescuable);
+
+        // Sampling order: files with keyword in path first (most likely relevant),
+        // then source files in core dirs, then everything else.
+        const byDepth = arr => [...arr].sort((a, b) => a.split('/').length - b.split('/').length);
+        const kwHits  = validCut.filter(p => keywords.some(kw => p.toLowerCase().replace(/[-_.]/g, ' ').includes(kw)));
+        const kwSet   = new Set(kwHits);
+        const coreSrc = validCut.filter(p => !kwSet.has(p) && p.split('/').some(d => RESCUE_CORE_DIRS.has(d.toLowerCase())));
+        const coreSrcSet = new Set(coreSrc);
+        const rest    = validCut.filter(p => !kwSet.has(p) && !coreSrcSet.has(p));
+        const rescueSample = [
+          ...byDepth(kwHits).slice(0, 30),
+          ...byDepth(coreSrc).slice(0, 50),
+          ...byDepth(rest).slice(0, 10),
+        ].slice(0, 80);
+
+        if (rescueSample.length > 0) {
+          const rescueMap = await fetchMultipleFiles(owner, repo, rescueSample);
+
+          // v6: use head scoring (first 50 lines) — large structural files declare
+          // their purpose at the top; full-file scoring dilutes the signal.
+          const candidateScored = candidatePaths
+            .map(p => ({ path: p, score: contentScoreHead(fetchedContent.get(p) || "", keywords) }))
+            .sort((a, b) => a.score - b.score);
+
+          const cutScored = rescueSample
+            .map(p => ({ path: p, score: contentScoreHead(rescueMap.get(p) || "", keywords) }))
+            .filter(f => f.score >= 0.25)
+            .sort((a, b) => b.score - a.score);
+
+          // Swap: replace weakest candidates with stronger cut files
+          for (let i = 0; i < Math.min(5, cutScored.length); i++) {
+            if (i >= candidateScored.length) break;
+            if (cutScored[i].score > candidateScored[i].score) {
+              fetchedContent.delete(candidateScored[i].path);
+              fetchedContent.set(cutScored[i].path, rescueMap.get(cutScored[i].path));
+            }
+          }
+        }
+      }
       if (abortRef.current) return;
 
       // ── Step 2: Parse + graph-order candidates ────────────────────────────
       setStep(2);
       setStepDetail("Parsing files and building import graph...");
 
+      const allPaths = [...fetchedContent.keys()];
       const parsed = allPaths
         .filter(p => fetchedContent.get(p) != null)
         .map(path => {
@@ -441,8 +585,38 @@ export default function RepoPage({ params }) {
           return { path, content, ...parseFile(path, content) };
         });
 
+      // Build monorepo package map: package-name → directory path
+      // Used to resolve cross-package imports (e.g. @supabase/pg-meta → packages/pg-meta/src)
+      const packageMap = new Map();
+      for (const f of parsed) {
+        if (f.path.match(/^(packages|apps|libs)\/[^/]+\/package\.json$/) && f.content) {
+          try {
+            const pkg = JSON.parse(f.content);
+            if (pkg.name) packageMap.set(pkg.name, f.path.replace("/package.json", ""));
+          } catch {}
+        }
+      }
+
       const { orderByGraph } = await import("../lib/graph");
-      const ordered = orderByGraph(parsed, keywords);
+      const graphOrdered = orderByGraph(parsed, keywords, packageMap.size > 0 ? packageMap : null);
+
+      // Content re-ranking: promote files whose content strongly matches keywords.
+      // This catches files with generic names but task-specific content (e.g. ReactFiberThrow.js).
+      // High-scorers float to the top of the LLM window; the LLM pruner removes false positives.
+      let ordered;
+      if (keywords.length > 0) {
+        const CONTENT_THRESHOLD = 0.2;
+        const withScores = graphOrdered.map(f => ({
+          ...f,
+          _cs: contentMatchScore(f.content || "", keywords),
+        }));
+        const high = withScores.filter(f => f._cs >= CONTENT_THRESHOLD)
+          .sort((a, b) => b._cs - a._cs);
+        const highSet = new Set(high.map(f => f.path));
+        ordered = [...high, ...withScores.filter(f => !highSet.has(f.path))];
+      } else {
+        ordered = graphOrdered;
+      }
 
       setStepDetail(
         `${meta.totalInRepo.toLocaleString()} total → ${meta.totalFiltered.toLocaleString()} filtered → ${ordered.length} candidates`
@@ -450,63 +624,79 @@ export default function RepoPage({ params }) {
       await new Promise(r => setTimeout(r, 60));
       if (abortRef.current) return;
 
-      // ── Step 3: LLM binary pruning ────────────────────────────────────────
+      // ── Step 3: LLM pruning ───────────────────────────────────────────────
       setStep(3);
 
-      // Groq TPM = input_tokens + max_tokens_requested.
-      // With max_tokens=2500 and ~1,600 input tokens budget:
-      //   35 files × ~65 output tokens = 2,275 → fits in 2500
-      //   35 files × ~45 input tokens = 1,575 + 400 prompt = 1,975 input
-      //   Total: 1,975 + 2,500 = 4,475 << 6,000 TPM limit ✓
-      const MAX_LLM_FILES = 35;
-      const MAX_FILE_CHARS = 13000;
+      // Scale candidate window with repo size so large repos (django, rails) get
+      // enough structural files into the LLM window.
+      // Formula: log10(totalFiltered) * 18, clamped [35, 75].
+      // ~300 files → 44, ~1000 → 54, ~3000 → 63, ~10000 → 72
+      const MAX_LLM_FILES = Math.min(75, Math.max(35, Math.floor(Math.log10(meta.totalFiltered + 1) * 18)));
+      const MAX_PRUNE_TOKENS = Math.max(2500, MAX_LLM_FILES * 90);
+      // v6: finer adaptive budget + hard char cap to prevent token overflow on large repos
+      const PER_FILE_BUDGET =
+        meta.totalFiltered > 5000 ? 300 :
+        meta.totalFiltered > 1000 ? 360 :
+        meta.totalFiltered > 500  ? 400 :
+        meta.totalFiltered > 150  ? 460 : 560;
+      const MAX_PROMPT_CHARS = 36000;
       let fileDescriptions = "";
       let includedForLLM = [];
       for (const f of ordered) {
         if (includedForLLM.length >= MAX_LLM_FILES) break;
+        if (fileDescriptions.length > MAX_PROMPT_CHARS) break;
         const detail = f.summary.startsWith(f.path + ": ")
           ? f.summary.slice(f.path.length + 2)
           : (f.summary || f.path);
-        const entry = `FILE: ${f.path}\n${detail}`;
-        if (fileDescriptions.length + entry.length + 2 > MAX_FILE_CHARS) break;
+        // v6: include structural role annotation + first 15 code lines
+        const role = detectRole(f.path, f.content || "");
+        const codeLines = (f.content || "").split("\n").slice(0, 15).join("\n");
+        let entry = `FILE: ${f.path}`;
+        if (role) entry += `\n${role}`;
+        entry += `\n${detail}\n---\n${codeLines}`;
+        if (entry.length > PER_FILE_BUDGET) entry = entry.slice(0, PER_FILE_BUDGET) + "…";
         fileDescriptions += (fileDescriptions ? "\n\n" : "") + entry;
         includedForLLM.push(f);
       }
 
-      setStepDetail(`Reviewing ${includedForLLM.length} candidates...`);
-
       const llmHeaders = { "Content-Type": "application/json", ...(activeKey ? { "x-groq-key": activeKey } : {}) };
 
-      const pruneRes = await fetch("/api/llm", {
-        method: "POST",
-        headers: llmHeaders,
-        body: JSON.stringify({
-          messages: [{
-            role: "user",
-            content:
+      // For tiny repos (≤20 candidates) the LLM degrades quality — it receives
+      // nearly everything and hedges toward keeping all of it. Skip it and rely
+      // on the content/graph ordering which is already calibrated.
+      const keptSet = new Set();
+      let allPruneResults = []; // [{file, removable, reason}] — populated when LLM runs
+      const TINY_REPO = 20;
+
+      if (includedForLLM.length <= TINY_REPO) {
+        setStepDetail(`${includedForLLM.length} candidates — using ranked order`);
+        ordered.slice(0, 8).forEach(f => keptSet.add(f.path));
+      } else {
+        setStepDetail(`Reviewing ${includedForLLM.length} candidates...`);
+
+        const pruneRes = await fetch("/api/llm", {
+          method: "POST",
+          headers: llmHeaders,
+          body: JSON.stringify({
+            messages: [{
+              role: "user",
+              content:
 `You are a senior engineer identifying the MINIMUM file set needed to complete a programming task.
 
-Task: "${task}"
-
-${includedForLLM.length} candidate files are listed below. For each file:
-Can it be REMOVED without preventing the task from being completed?
+Task: "${t}"
 
 REMOVE (removable: true) if the file:
-- Handles a clearly different feature area (logging, view rendering, CLI, session management, path routing) when those are not what the task is about
-- Is general infrastructure the task doesn't directly touch (error types, utility helpers, internal data structures like routing trees)
-- Is metadata (package.json, tsconfig) not specific to this task
-- Is "good to know" about the framework but not needed to implement this specific feature
+- Handles a clearly different feature area not needed for this task
+- Is metadata or config not specific to this task
 - The developer could complete the task without ever opening this file
 
-KEEP (removable: false) ONLY if the file:
-- Defines types or interfaces the task directly creates or consumes
+KEEP (removable: false) if the file:
+- Directly implements or defines the feature
+- Is the single framework-level file where this specific feature type is registered or processed
+- Is a base class a kept file MUST inherit from (check [inherits:] or [extends:] annotations)
 - Contains logic that MUST be read or modified to complete the task
-- Is the exact registration/wiring point (e.g. where middleware is applied, where hooks are exported)
-- Is a direct import of another kept file AND provides something the task specifically needs
 
-The developer is already familiar with the language and framework. They don't need general reference files. They need ONLY the files that implement, register, or type-check this exact feature.
-
-Be aggressive — 4 perfect files beats 12 with noise. When in doubt, remove it.
+Be aggressive: 4 perfect files beats 12 with noise. When in doubt, remove.
 
 Return ONLY a JSON array — no markdown, no explanation:
 [{"file":"path","removable":false,"reason":"one sentence"},...]
@@ -515,39 +705,45 @@ Include ALL ${includedForLLM.length} files.
 
 FILES:
 ${fileDescriptions}`,
-          }],
-          max_tokens: 2500,
-        }),
-      });
+            }],
+            max_tokens: MAX_PRUNE_TOKENS,
+          }),
+        });
 
-      if (!pruneRes.ok) {
-        const errBody = await pruneRes.json().catch(() => ({}));
-        const rawMsg = errBody.error?.message || "";
-        if (pruneRes.status === 429) {
-          throw new Error(
-            activeKey
-              ? "Your Groq API key has reached its rate limit. Please wait a moment and try again."
-              : "The shared inference quota is temporarily exhausted. Add your own free Groq API key (top right) to continue without interruption."
-          );
+        let usedFallback = false;
+        if (!pruneRes.ok) {
+          // LLM unavailable (rate limit, outage, etc.) — fall back to graph+content ordering.
+          // Users still get useful results; a banner will note AI pruning was skipped.
+          usedFallback = true;
         }
-        throw new Error(rawMsg || `LLM API error ${pruneRes.status}`);
-      }
-      const pruneData = await pruneRes.json();
-      if (abortRef.current) return;
 
-      const pruneText = pruneData.choices?.[0]?.message?.content || "";
-      let pruneResults = [];
-      try {
-        const match = pruneText.match(/\[[\s\S]*\]/);
-        pruneResults = JSON.parse(match ? match[0] : pruneText);
-      } catch {
-        // JSON parse failed — keep everything and continue
-        pruneResults = includedForLLM.map(f => ({ file: f.path, removable: false, reason: "" }));
-      }
+        if (!usedFallback) {
+          const pruneData = await pruneRes.json();
+          if (abortRef.current) return;
 
-      const keptSet = new Set(pruneResults.filter(r => !r.removable).map(r => r.file));
-      // Safety: only restore if LLM kept literally nothing (sufficiency check handles the rest)
-      if (keptSet.size < 1) includedForLLM.forEach(f => keptSet.add(f.path));
+          const pruneText = pruneData.choices?.[0]?.message?.content || "";
+          let pruneResults = [];
+          try {
+            const match = pruneText.match(/\[[\s\S]*\]/);
+            pruneResults = JSON.parse(match ? match[0] : pruneText);
+          } catch {
+            usedFallback = true;
+          }
+
+          if (!usedFallback) {
+            // v6: LLM returns [{file, removable, reason}] objects
+            allPruneResults = pruneResults;
+            pruneResults.filter(r => !r.removable).forEach(r => keptSet.add(r.file));
+            if (keptSet.size < 1) includedForLLM.forEach(f => keptSet.add(f.path));
+          }
+        }
+
+        if (usedFallback) {
+          // Heuristic fallback: top files by graph+content ranking, no LLM needed
+          ordered.slice(0, 6).forEach(f => keptSet.add(f.path));
+          setModelStatus("AI pruning unavailable — showing top files by relevance ranking.");
+        }
+      }
 
       const keptFiles = ordered.filter(f => keptSet.has(f.path));
       setStepDetail(`Pruned to ${keptFiles.length} files`);
@@ -557,8 +753,18 @@ ${fileDescriptions}`,
       setStep(4);
       setStepDetail("Verifying completeness...");
 
-      const keptSummaries = keptFiles.map(f => `- ${f.summary}`).join("\n");
-      const allAvailablePaths = parsed.map(f => f.path).join("\n");
+      // v6: include structural role annotations in kept summaries so the LLM can
+      // see inheritance relationships and cite them in the sufficiency response.
+      const keptSummaries = keptFiles.map(f => {
+        const role = detectRole(f.path, f.content || "");
+        const detail = f.summary.startsWith(f.path + ": ") ? f.summary.slice(f.path.length + 2) : f.summary;
+        return `- ${f.path}${role ? " " + role : ""}: ${detail}`;
+      }).join("\n");
+
+      const availablePaths = parsed
+        .filter(f => !keptSet.has(f.path) && (keywords.length === 0 || pathMatchScore(f.path, keywords) > 0))
+        .map(f => f.path)
+        .join("\n");
 
       const checkRes = await fetch("/api/llm", {
         method: "POST",
@@ -567,32 +773,30 @@ ${fileDescriptions}`,
           messages: [{
             role: "user",
             content:
-`Task: "${task}"
+`Task: "${t}"
 
-These ${keptFiles.length} files remain after pruning:
+Files kept after pruning:
 ${keptSummaries}
 
-Can this task be completed with ONLY these files?
-Specifically check for:
-- Missing type definitions or interfaces the task depends on
-- Missing request/response object definitions if the task involves HTTP middleware or request handling
-- Missing core infrastructure files (e.g. router, dispatcher, middleware chain) needed to understand where the feature hooks in
-- Missing registration or wiring files (where the feature gets registered in the framework)
-- Missing configuration schemas or option types
+Check ONLY for these two things:
+1. A base class or mixin a kept file explicitly inherits from — visible in [inherits:] or [extends:] annotations above
+2. The top-level application/router entry file (app.go, application.js, Application.php, app.rs, Kernel.php, server.js) where this feature type gets registered in the framework
 
-Be conservative: if a file defines request/response properties or how the system processes requests/events relevant to this task, include it even if not directly modified.
+For case 1 (base class): provide "cited_by" — the exact kept file that inherits from it. No valid citation = skip it.
+For case 2 (registration file): provide "type":"registration" — no citation needed, just name the entry file.
+Max 3 additions total. Do NOT add type utilities, helpers, or unrelated files.
 
-If anything critical is missing, list the exact file paths from the available set below.
+Available paths:
+${availablePaths || "(none)"}
 
-Return ONLY valid JSON — no other text:
-{"sufficient":true,"missing":[],"reason":"brief"}
-OR
-{"sufficient":false,"missing":["exact/path/here"],"reason":"what is missing"}
-
-Available paths to add back if needed:
-${allAvailablePaths}`,
+Return ONLY valid JSON:
+{"sufficient":true,"missing":[]}
+{"sufficient":false,"missing":[
+  {"path":"exact/path","cited_by":"kept/file/that/inherits"},
+  {"path":"app.go","type":"registration"}
+]}`,
           }],
-          max_tokens: 512,
+          max_tokens: 500,
         }),
       });
 
@@ -605,9 +809,24 @@ ${allAvailablePaths}`,
           const match = checkText.match(/\{[\s\S]*\}/);
           const checkResult = JSON.parse(match ? match[0] : checkText);
           if (!checkResult.sufficient && Array.isArray(checkResult.missing)) {
-            for (const missingPath of checkResult.missing) {
-              const found = parsed.find(f => f.path === missingPath);
-              if (found) keptSet.add(found.path);
+            const availableSet = new Set(parsed.map(f => f.path));
+            let added = 0;
+            let registrationAdded = 0;
+            for (const item of checkResult.missing) {
+              if (added >= 3) break;
+              const missingPath = typeof item === "string" ? item : item?.path;
+              const citedBy = typeof item === "object" ? item?.cited_by : null;
+              const itemType = typeof item === "object" ? item?.type : null;
+              if (!missingPath || !availableSet.has(missingPath)) continue;
+              if (itemType === "registration" || isRegistrationFile(missingPath)) {
+                // Registration/entry files: add without citation, max 1
+                if (registrationAdded >= 1) continue;
+                keptSet.add(missingPath); added++; registrationAdded++;
+              } else {
+                // Base classes: require valid citation from a kept file
+                if (!citedBy || !keptSet.has(citedBy)) continue;
+                keptSet.add(missingPath); added++;
+              }
             }
           }
         } catch { /* keep current set */ }
@@ -615,17 +834,18 @@ ${allAvailablePaths}`,
       if (abortRef.current) return;
 
       // ── Build final results ───────────────────────────────────────────────
-      const reasonMap = new Map(pruneResults.map(r => [r.file, r.reason]));
+      const reasonMap = new Map(allPruneResults.map(r => [r.file, r.reason]));
       const finalResults = parsed
         .filter(f => keptSet.has(f.path))
         .map(f => ({
           path: f.path,
           content: f.content,
           summary: f.summary,
-          reason: reasonMap.get(f.path) || f.summary,
+          reason: reasonMap.get(f.path) || (f.summary.startsWith(f.path + ": ") ? f.summary.slice(f.path.length + 2) : f.summary),
         }));
 
       saveCache(owner, repo, t, finalResults);
+      storeServerCache(owner, repo, t, finalResults);
       setResults(finalResults);
       setSelected(new Set(finalResults.map(r => r.path)));
       setRanTask(t);
@@ -815,7 +1035,7 @@ ${allAvailablePaths}`,
               type="text"
               value={task}
               onChange={e => setTask(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) runAnalysis(); }}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { if (task.trim()) runAnalysis(); else setShowKeyInput(true); } }}
               placeholder='e.g. "add OAuth login", "fix memory leak in event loop", "implement dark mode"'
               disabled={status === "running"}
               style={{
@@ -832,15 +1052,15 @@ ${allAvailablePaths}`,
               }}
             />
             <button
-              onClick={() => runAnalysis()}
-              disabled={status === "running" || !task.trim()}
+              onClick={() => task.trim() ? runAnalysis() : setShowKeyInput(true)}
+              disabled={status === "running" || (!!groqKey && !task.trim())}
               style={{
                 padding: "0.75rem 1.5rem",
-                background: status === "running" ? "var(--bg-tertiary)" : "var(--accent)",
-                color: status === "running" ? "var(--text-muted)" : "#fff",
-                border: status === "running" ? "1px solid var(--border)" : "none",
+                background: status === "running" ? "var(--bg-tertiary)" : !groqKey ? "var(--bg-secondary)" : "var(--accent)",
+                color: status === "running" ? "var(--text-muted)" : !groqKey ? "var(--accent)" : "#fff",
+                border: status === "running" ? "1px solid var(--border)" : !groqKey ? "1px solid var(--accent)" : "none",
                 borderRadius: "6px",
-                cursor: status === "running" || !task.trim() ? "not-allowed" : "pointer",
+                cursor: status === "running" || (!!groqKey && !task.trim()) ? "not-allowed" : "pointer",
                 fontSize: "0.875rem",
                 fontFamily: "inherit",
                 fontWeight: 600,
@@ -848,7 +1068,7 @@ ${allAvailablePaths}`,
                 transition: "background 0.15s",
               }}
             >
-              {status === "running" ? "Running..." : "Find Context"}
+              {status === "running" ? "Running..." : !groqKey ? "Add API key →" : "Find Context"}
             </button>
           </div>
         </div>
@@ -889,6 +1109,7 @@ ${allAvailablePaths}`,
               toggle={toggleSelected}
               onCopy={copyLinks}
               totalTokens={totalTokens}
+              totalInRepo={repoTotalFiles}
               owner={owner}
               repo={repo}
               task={ranTask}
@@ -1004,7 +1225,7 @@ function Spinner() {
   );
 }
 
-function Results({ results, selected, toggle, onCopy, totalTokens, owner, repo, task }) {
+function Results({ results, selected, toggle, onCopy, totalTokens, totalInRepo, owner, repo, task }) {
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
 
@@ -1039,6 +1260,11 @@ function Results({ results, selected, toggle, onCopy, totalTokens, owner, repo, 
           <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginLeft: "0.6rem" }}>
             relevant to &quot;{task}&quot;
           </span>
+          {totalInRepo > 0 && (
+            <span style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginLeft: "0.6rem" }}>
+              · {Math.round((1 - results.length / totalInRepo) * 100)}% reduction
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
