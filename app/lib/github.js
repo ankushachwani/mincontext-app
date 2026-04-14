@@ -20,6 +20,9 @@ const SKIP_PATH_SEGMENTS = new Set([
   "test-helpers", "test-utils", "test-support", "test-fixtures",
   "generated", "gen", "pb", "proto",
   "evals", "eval", "evaluations", "evaluation",
+  "generators", "templates",
+  "compiled", "dist_client", "dist_server",
+  "docs_src", "doc_src",
 ]);
 
 const SKIP_EXTENSIONS = new Set([
@@ -32,6 +35,7 @@ const SKIP_EXTENSIONS = new Set([
   ".exe", ".dll", ".so", ".dylib", ".bin", ".obj", ".o", ".a",
   ".pyc", ".class", ".jar", ".war",
   ".wasm", ".pb", ".proto.js", ".mdx", ".md", ".rst", ".txt",
+  ".tt", ".erb.tt", ".rb.tt",
 ]);
 
 const SKIP_FILENAME_PATTERNS = [
@@ -101,6 +105,11 @@ function fileImportanceScore(path) {
   const depth = parts.length;
   const filename = parts[parts.length - 1];
   const topDir = parts[0];
+  // Also check second-level dir: repos like django/, rails/, axum/ wrap their
+  // source under <repo>/src/, <repo>/core/, etc. — missing this makes depth-4
+  // files (e.g. django/core/handlers/base.py, axum/src/routing/mod.rs) score
+  // poorly against shallower files that aren't the real source root.
+  const secondDir = parts.length >= 3 ? parts[1] : "";
   const ext = filename.includes(".") ? "." + filename.split(".").pop() : "";
 
   const SOURCE_EXTS = new Set([".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".rs", ".rb", ".java", ".kt", ".c", ".cpp", ".cs", ".swift", ".php", ".vue", ".svelte"]);
@@ -108,7 +117,7 @@ function fileImportanceScore(path) {
   const CORE_DIRS = new Set(["lib", "src", "pkg", "internal", "core", "source", "packages", "app", "cmd", "api"]);
 
   let score = depth * 8;
-  if (CORE_DIRS.has(topDir)) score -= 40;
+  if (CORE_DIRS.has(topDir) || CORE_DIRS.has(secondDir)) score -= 40;
   if (SOURCE_EXTS.has(ext)) score -= 5;
   if (CONFIG_EXTS.has(ext)) score += 10;
   return score;
@@ -177,6 +186,42 @@ function pathIdfScore(filePath, keywords, idf) {
   };
 }
 
+/** Detect monorepo and return a scoring bonus map: packageDir → bonus score reduction */
+function buildMonorepoPackageBonus(allFiles, keywords) {
+  if (!keywords.length) return null;
+  // Detect monorepo indicators
+  const hasWorkspace = allFiles.some(f =>
+    f.path === "pnpm-workspace.yaml" || f.path === "lerna.json" || f.path === "nx.json" ||
+    f.path === "rush.json" || f.path === "turbo.json"
+  );
+  const packageJsonFiles = allFiles.filter(f => f.path.match(/^(packages|apps|libs)\/[^/]+\/package\.json$/));
+  if (!hasWorkspace && packageJsonFiles.length < 2) return null;
+
+  // Find which packages match keywords via their directory name
+  const packageDirs = packageJsonFiles.map(f => f.path.replace("/package.json", ""));
+  const bonusMap = new Map(); // dir → score bonus (negative = better)
+  for (const dir of packageDirs) {
+    const norm = dir.toLowerCase().replace(/[-_./]/g, " ");
+    const hits = keywords.filter(kw => norm.includes(kw)).length;
+    if (hits > 0) bonusMap.set(dir, -80 * hits); // strongly prefer matching packages
+  }
+  return bonusMap.size > 0 ? bonusMap : null;
+}
+
+/** Use GitHub code search API to recover file paths when tree is truncated. */
+async function searchCodeForKeywords(owner, repo, keywords, token) {
+  if (!keywords.length) return [];
+  try {
+    const q = encodeURIComponent(`${keywords.slice(0, 3).join(" ")} repo:${owner}/${repo}`);
+    const headers = { Accept: "application/vnd.github.v3+json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`https://api.github.com/search/code?q=${q}&per_page=30`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.items || []).map(item => item.path).filter(p => !shouldSkipFile(p));
+  } catch { return []; }
+}
+
 export async function fetchFileTree(owner, repo, token, keywords = []) {
   const headers = { Accept: "application/vnd.github.v3+json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -193,9 +238,18 @@ export async function fetchFileTree(owner, repo, token, keywords = []) {
   }
 
   const data = await res.json();
-  const allFiles = (data.tree || []).filter(
+  let allFiles = (data.tree || []).filter(
     item => item.type === "blob" && !shouldSkipFile(item.path)
   );
+
+  // If tree was truncated, recover more files via code search
+  if (data.truncated && keywords.length) {
+    const searchPaths = await searchCodeForKeywords(owner, repo, keywords, token);
+    const existingPaths = new Set(allFiles.map(f => f.path));
+    for (const p of searchPaths) {
+      if (!existingPaths.has(p)) allFiles.push({ path: p, type: "blob" });
+    }
+  }
 
   const SMALL_REPO = 120;
   let files;
@@ -208,37 +262,50 @@ export async function fetchFileTree(owner, repo, token, keywords = []) {
   } else {
     // IDF-weighted candidate selection
     const idf = computeKeywordIDF(allFiles, keywords);
+    const monorepoBonus = buildMonorepoPackageBonus(allFiles, keywords);
 
-    const scored = allFiles.map(f => ({
-      ...f,
-      ...pathIdfScore(f.path, keywords, idf),
-      importance: fileImportanceScore(f.path),
-    }));
+    const scored = allFiles.map(f => {
+      const idfResult = pathIdfScore(f.path, keywords, idf);
+      let importance = fileImportanceScore(f.path);
+      // Apply monorepo package bonus: files in the most keyword-matching package score better
+      if (monorepoBonus) {
+        for (const [dir, bonus] of monorepoBonus) {
+          if (f.path.startsWith(dir + "/")) { importance += bonus; break; }
+        }
+      }
+      return { ...f, ...idfResult, importance };
+    });
 
     // Tier 1: files with a high-scoring path segment (tight keyword cluster)
-    // e.g. "cache-handlers" hits both "cache" (IDF 4.5) and "handler" (IDF 5.4) = 9.9
-    const T1_THRESHOLD = 5.5; // require meaningful IDF in a single segment/combined
+    const T1_THRESHOLD = 5.5;
     const tier1 = scored.filter(f => f.maxSeg >= T1_THRESHOLD);
     const tier1Set = new Set(tier1.map(f => f.path));
+
+    // Scale tier caps with repo size: large repos need more structural coverage
+    // to ensure deeply-nested core files (e.g. django/core/handlers/base.py)
+    // survive into the content-fetch + LLM stages. 200-file threshold helps
+    // monorepos (e.g. axum) where many packages compete for the same slots.
+    const TIER_CAP = allFiles.length > 2000 ? 60 : allFiles.length > 500 ? 50 : allFiles.length > 200 ? 45 : 40;
 
     // Tier 2: remaining files with any keyword match in path, sorted by IDF score
     const tier2 = scored
       .filter(f => !tier1Set.has(f.path) && f.total > 0)
       .sort((a, b) => b.total - a.total || a.importance - b.importance)
-      .slice(0, 40);
+      .slice(0, TIER_CAP);
     const tier12Set = new Set([...tier1, ...tier2].map(f => f.path));
 
     // Tier 3: top files by structural importance (ensures core files are always present)
     const tier3 = scored
       .filter(f => !tier12Set.has(f.path))
       .sort((a, b) => a.importance - b.importance)
-      .slice(0, 40);
+      .slice(0, TIER_CAP);
 
     files = [...tier1, ...tier2, ...tier3];
   }
 
   return {
     files,
+    allFilteredPaths: allFiles.map(f => f.path),
     meta: {
       totalInRepo: (data.tree || []).length,
       totalFiltered: allFiles.length,

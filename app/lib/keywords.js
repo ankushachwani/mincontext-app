@@ -5,7 +5,7 @@ const STOPWORDS = new Set([
   "modify", "fix", "get", "set", "put", "use", "using", "new", "into",
   "that", "this", "from", "via", "how", "when", "what", "where", "which",
   "can", "so", "also", "want", "need", "should", "would", "will", "able",
-  "support", "allow", "enable", "handle", "work", "works", "working",
+  "support", "allow", "enable", "work", "works", "working",
 ]);
 
 /**

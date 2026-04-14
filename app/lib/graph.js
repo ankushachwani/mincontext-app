@@ -6,7 +6,7 @@
  * candidate list for LLM pruning — most-connected relevant files first.
  */
 
-/** Extract raw import specifiers from file content. Only relative + alias imports. */
+/** Extract raw import specifiers from file content. */
 function extractRawImports(content, filePath) {
   const results = [];
 
@@ -23,46 +23,66 @@ function extractRawImports(content, filePath) {
   const cjsRe = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
   while ((m = cjsRe.exec(content)) !== null) results.push(m[1]);
 
-  // Python relative: from .foo import bar
+  // Python relative: from .foo import bar / from .sansio.app import App
+  // Convert Python dot-notation to slash paths so the resolver can find them:
+  // .sansio.app → ./sansio/app, ..utils.helpers → ../utils/helpers
   const pyRe = /^from\s+(\.[^\s]+)\s+import/gm;
-  while ((m = pyRe.exec(content)) !== null) results.push(m[1]);
+  while ((m = pyRe.exec(content)) !== null) {
+    const raw = m[1];
+    const leadingDots = raw.match(/^\.+/)[0];
+    const rest = raw.slice(leadingDots.length);
+    results.push(leadingDots + (rest ? rest.replace(/\./g, "/") : ""));
+  }
 
-  // Only keep relative (./  ../) and common aliases (@/  ~/)
+  // Keep relative, common aliases, and scoped packages (for monorepo resolution)
   return results.filter(
-    (r) => r.startsWith(".") || r.startsWith("@/") || r.startsWith("~/")
+    (r) => r.startsWith(".") || r.startsWith("@/") || r.startsWith("~/") || r.startsWith("@")
   );
 }
 
 /** Resolve a raw import path to an actual file path present in pathSet. */
-function resolveImport(raw, fromPath, pathSet) {
+function resolveImport(raw, fromPath, pathSet, packageMap = null) {
   const fromDir = fromPath.split("/").slice(0, -1).join("/");
+  const exts = ["", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".rb"];
+  const suffixes = exts.flatMap((e) => [e, `/index${e}`]);
 
-  let base;
   if (raw.startsWith("@/") || raw.startsWith("~/")) {
     const rel = raw.slice(2);
-    // Try root, app/, src/ prefixes
     const prefixes = ["", "app/", "src/"];
-    const exts = ["", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".rb"];
-    const suffixes = exts.flatMap((e) => [e, `/index${e}`]);
     for (const pre of prefixes) {
       for (const s of suffixes) {
         if (pathSet.has(pre + rel + s)) return pre + rel + s;
       }
     }
     return null;
-  } else {
-    // Relative: resolve against fromDir
-    const parts = (fromDir ? fromDir + "/" + raw : raw).split("/");
-    const resolved = [];
-    for (const p of parts) {
-      if (p === "..") resolved.pop();
-      else if (p !== "." && p !== "") resolved.push(p);
-    }
-    base = resolved.join("/");
   }
 
-  const exts = ["", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".rb"];
-  const suffixes = exts.flatMap((e) => [e, `/index${e}`]);
+  // Monorepo package-scoped import: @scope/pkg or @scope/pkg/subpath
+  if (raw.startsWith("@") && packageMap) {
+    for (const [pkgName, pkgDir] of packageMap) {
+      if (raw === pkgName || raw.startsWith(pkgName + "/")) {
+        const sub = raw.slice(pkgName.length).replace(/^\//, "");
+        const bases = sub ? [`${pkgDir}/${sub}`, `${pkgDir}/src/${sub}`] : [`${pkgDir}/src`, pkgDir];
+        for (const b of bases) {
+          for (const s of suffixes) {
+            if (pathSet.has(b + s)) return b + s;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  if (!raw.startsWith(".")) return null;
+
+  // Relative: resolve against fromDir
+  const parts = (fromDir ? fromDir + "/" + raw : raw).split("/");
+  const resolved = [];
+  for (const p of parts) {
+    if (p === "..") resolved.pop();
+    else if (p !== "." && p !== "") resolved.push(p);
+  }
+  const base = resolved.join("/");
   for (const s of suffixes) {
     if (pathSet.has(base + s)) return base + s;
   }
@@ -70,7 +90,7 @@ function resolveImport(raw, fromPath, pathSet) {
 }
 
 /** Build forward (imports) and reverse (imported-by) adjacency maps. */
-function buildImportGraph(files) {
+function buildImportGraph(files, packageMap = null) {
   const pathSet = new Set(files.map((f) => f.path));
   const forward = new Map();
   const reverse = new Map();
@@ -81,7 +101,7 @@ function buildImportGraph(files) {
 
   for (const f of files) {
     for (const raw of extractRawImports(f.content, f.path)) {
-      const resolved = resolveImport(raw, f.path, pathSet);
+      const resolved = resolveImport(raw, f.path, pathSet, packageMap);
       if (resolved) {
         forward.get(f.path).add(resolved);
         if (reverse.has(resolved)) reverse.get(resolved).add(f.path);
@@ -166,10 +186,10 @@ function findRoots(files, keywords, graph) {
  *
  * Files outside BFS reach are appended at the end (so LLM still sees them).
  */
-export function orderByGraph(files, keywords) {
+export function orderByGraph(files, keywords, packageMap = null) {
   if (files.length <= 15) return files; // small enough, no reorder needed
 
-  const graph = buildImportGraph(files);
+  const graph = buildImportGraph(files, packageMap);
   const roots = findRoots(files, keywords, graph);
 
   if (roots.length === 0) return files;
