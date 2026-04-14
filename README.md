@@ -2,29 +2,45 @@
 
 **Find the exact files you need for any task in any GitHub repo.**
 
-Instead of pasting an entire codebase into an AI assistant, mincontext analyzes the repo and returns only the files that matter for your specific task. The AI reads actual file contents and import graphs — not just filename keywords.
+Paste a GitHub repository and a task description. mincontext returns the minimum set of files a developer would need to open to complete that task — nothing more, nothing less. Copy the results directly into Claude, ChatGPT, Cursor, or any AI coding tool.
 
 ---
 
 ## How it works
 
-1. **Paste a GitHub repo** — any public repo, any language, any size
-2. **Describe your task** — "add rate limiting middleware", "implement OAuth login", "fix memory leak in event loop"
-3. **Get the exact files** — copy the GitHub links directly into Claude, ChatGPT, Cursor, or any AI tool
+1. **Paste a GitHub repo** — any public repository, any language, any size
+2. **Describe your task** — e.g. "add rate limiting middleware", "implement OAuth login", "add a custom health indicator"
+3. **Get the file set** — copy the GitHub links directly into your AI tool of choice
+
+The pipeline fetches the repository tree, pre-filters noise (tests, build artifacts, generated files, docs), fetches candidate file contents in parallel, builds an import graph to identify connected files, and runs two LLM passes: one to prune irrelevant candidates, one to verify completeness. The result is a small, precise set of files with a one-line explanation for each.
 
 ---
 
-## Features
+## Accuracy
 
-- **Reads actual code** — builds an import graph, then uses an LLM to evaluate candidates by reading file contents and exports
-- **Any language** — JavaScript, TypeScript, Python, Go, Rust, Ruby, Java, and more
-- **No false positives** — only returns files you would actually open to implement the task
-- **Fast** — tree fetch + parallel content fetch + single LLM call, typically under 15 seconds
-- **Your key, your quota** — add your free [Groq API key](https://console.groq.com) for higher accuracy and unlimited use
+Evaluated across **27 repositories** spanning 10 languages and a range of repository sizes (29 to 20,717 files):
+
+| Metric | Score |
+|--------|-------|
+| Recall | 91% |
+| Precision | 93% |
+| File reduction | 98% |
+
+**Recall** is the fraction of files a developer would actually need, that the pipeline returned. **Precision** is the fraction of returned files that were genuinely needed. **File reduction** is the fraction of repository files eliminated.
+
+24 of 27 test cases produced fully correct output (100% recall and precision). The three exceptions are documented in [`docs/results.md`](docs/results.md) along with their root causes.
 
 ---
 
-## Self-hosting
+## Usage
+
+### Web app
+
+[mincontext.app](https://mincontext.app) — requires a free [Groq API key](https://console.groq.com). Takes 2 minutes to set up, no credit card needed. Your key is stored only in your browser and never sent to our servers.
+
+The pipeline uses `llama-3.3-70b-versatile` — the model all evaluation numbers above reflect.
+
+### Self-hosting
 
 ```bash
 git clone https://github.com/your-username/mincontext
@@ -32,7 +48,7 @@ cd mincontext
 npm install
 ```
 
-Create a `.env.local` file:
+Create `.env.local`:
 
 ```
 GROQ_API_KEY=gsk_your_key_here
@@ -48,32 +64,42 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Architecture
+## Pipeline
 
 ```
 GitHub tree API
-  → filter noise (test files, build artifacts, docs)
-  → fetch all file contents in parallel
-  → parse imports/exports per file
-  → build import graph + BFS ordering (keyword-connected files first)
-  → LLM binary pruning: keep/remove per file
-  → sufficiency check: add back any missing critical files
-  → final file set with reasons
+  → pre-filter: strip tests, build artifacts, docs, generated files
+  → IDF-weighted path scoring: select up to 80 candidate files
+  → fetch all candidate contents in parallel (batched)
+  → rescue pass: sample cut files by content score, promote if stronger than weakest candidate
+  → parse imports/exports/symbols per file (JS/TS, Python, Go, Rust, Ruby, Java, PHP)
+  → build import graph → BFS from keyword-matching roots → reorder by relevance
+  → LLM prune pass: keep/remove decision per file with structural role annotations
+  → LLM sufficiency check: citation-gated base class recovery + registration file detection
+  → final file set with per-file reasoning
 ```
 
-The LLM receives structured summaries — what each file exports, imports, and defines — not raw file dumps. This keeps token usage low and latency fast.
-
-**Models:**
-- Without API key: `llama-3.1-8b-instant` (Groq shared quota)
-- With your own API key: `llama-3.3-70b-versatile` (higher accuracy, your own quota)
+The LLM receives structured file summaries — parsed imports, exports, symbols, and the first 15 lines of code — not raw file dumps. This keeps prompts compact and latency low while giving the model enough signal to make accurate keep/remove decisions.
 
 ---
 
 ## Stack
 
 - [Next.js 14](https://nextjs.org) — App Router, Edge Functions
-- [Groq](https://groq.com) — LLM inference
-- GitHub REST API — repo tree and raw file content
+- [Groq](https://groq.com) — LLM inference (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`)
+- GitHub REST API — repository tree and raw file content
+- Vercel KV — shared result cache (server-side, 7-day TTL)
+
+---
+
+## Deploying
+
+1. Push to GitHub, import project on [Vercel](https://vercel.com)
+2. Add environment variable: `GROQ_API_KEY=gsk_...`
+3. Vercel dashboard → Storage → Create KV database → Connect to project
+4. Deploy
+
+The KV cache means the first request for a given repo/task pays the LLM cost; all subsequent users receive the cached result in ~500ms with no model call.
 
 ---
 
