@@ -6,8 +6,13 @@
 </p>
 
 <p align="center">
-  <a href="https://mincontext-app.vercel.app">Live Demo</a> ·
-  <a href="https://console.groq.com">Get a free Groq API key</a>
+  <a href="https://mincontext-app.vercel.app">
+    <img alt="Website" src="https://img.shields.io/badge/website-mincontext--app.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white" />
+  </a>
+  &nbsp;
+  <a href="https://console.groq.com">
+    <img alt="Groq API Key" src="https://img.shields.io/badge/get_a_free_groq_api_key-F55036?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMSAxNHYtNEg3bDUtOHY0aDRsLTUgOHoiLz48L3N2Zz4=" />
+  </a>
 </p>
 
 <p align="center">
