@@ -397,12 +397,17 @@ export default function RepoPage({ params }) {
   useEffect(() => { if (showKeyInput) { setDraftKey(groqKey); setKeyAction(null); } }, [showKeyInput]);
   const taskInputRef = useRef(null);
 
-  // On mount: read task from URL and pre-fill the input.
+  // On mount: read task from URL, pre-fill the input, and auto-run for shared links.
   // Avoids useSearchParams which causes a hydration mismatch in Next.js 14.
   useEffect(() => {
     if (!owner || !repo) return;
-    const urlTask = new URLSearchParams(window.location.search).get("task");
-    if (urlTask) setTask(urlTask);
+    const params = new URLSearchParams(window.location.search);
+    const urlTask = params.get("task");
+    const isShared = params.get("s") === "1";
+    if (urlTask) {
+      setTask(urlTask);
+      if (isShared) runAnalysis(urlTask);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -446,6 +451,69 @@ export default function RepoPage({ params }) {
     const t = (taskOverride ?? task).trim();
     if (!t) return;
 
+    // Read key directly from localStorage to avoid stale closure on auto-run
+    const activeKey = groqKey || (typeof window !== "undefined" ? localStorage.getItem("groq_key") || "" : "");
+
+    // No key — allow viewing shared results if URL has the share flag + embedded paths
+    const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const isShared = urlParams?.get("s") === "1";
+    if (!activeKey) {
+      if (isShared) {
+        // Primary: paths are embedded in the URL — fetch contents from GitHub directly, no backend needed
+        const encodedPaths = urlParams?.get("paths");
+        const paths = encodedPaths ? encodedPaths.split(",").filter(Boolean) : [];
+        let sharedResults = null;
+
+        if (paths.length > 0) {
+          setTask(t);
+          setStatus("running");
+          setStep(0); setStepDetail("Reading file tree...");
+          await new Promise(r => setTimeout(r, 300));
+          setStep(1); setStepDetail(`${paths.length} files fetched`);
+          const contentMap = await fetchMultipleFiles(owner, repo, paths);
+          await new Promise(r => setTimeout(r, 300));
+          setStep(2); setStepDetail("Building import graph...");
+          await new Promise(r => setTimeout(r, 300));
+          setStep(3); setStepDetail(`Reviewing ${paths.length} candidates...`);
+          await new Promise(r => setTimeout(r, 300));
+          setStep(4); setStepDetail("Verifying completeness...");
+          await new Promise(r => setTimeout(r, 250));
+          const fetched = paths
+            .filter(p => contentMap.get(p) != null)
+            .map(p => ({ path: p, content: contentMap.get(p) || "", summary: p, reason: "", ...parseFile(p, contentMap.get(p) || "") }));
+          if (fetched.length > 0) sharedResults = fetched;
+        }
+
+        // Fallback: server cache
+        if (!sharedResults) sharedResults = await checkServerCache(owner, repo, t);
+
+        if (sharedResults) {
+          setTask(t);
+          setFromCache(true);
+          if (paths.length === 0) {
+            setStatus("running");
+            setStep(0); setStepDetail("Reading file tree...");
+            await new Promise(r => setTimeout(r, 300));
+            setStep(1); setStepDetail(`${sharedResults.length} files fetched`);
+            await new Promise(r => setTimeout(r, 300));
+            setStep(2); setStepDetail("Building import graph...");
+            await new Promise(r => setTimeout(r, 300));
+            setStep(3); setStepDetail(`Reviewing ${sharedResults.length} candidates...`);
+            await new Promise(r => setTimeout(r, 300));
+            setStep(4); setStepDetail("Verifying completeness...");
+            await new Promise(r => setTimeout(r, 250));
+          }
+          setResults(sharedResults);
+          setSelected(new Set(sharedResults.map(r => r.path)));
+          setRanTask(t);
+          setStatus("done");
+          return;
+        }
+      }
+      setShowKeyInput(true);
+      return;
+    }
+
     // Check cache — play through steps animation before revealing
     const cached = loadCache(owner, repo, t) || await checkServerCache(owner, repo, t);
     if (cached) {
@@ -480,15 +548,6 @@ export default function RepoPage({ params }) {
     setFromCache(false);
     setTask(t);
     window.history.replaceState(null, "", `/${owner}/${repo}?task=${encodeURIComponent(t)}`);
-
-    // Read key directly from localStorage to avoid stale closure on auto-run
-    const activeKey = groqKey || (typeof window !== "undefined" ? localStorage.getItem("groq_key") || "" : "");
-
-    // Require an API key — shared quota uses a model too small for accurate results
-    if (!activeKey) {
-      setShowKeyInput(true);
-      return;
-    }
 
     const keywords = extractKeywords(t);
 
@@ -977,7 +1036,13 @@ Return ONLY valid JSON:
           </span>
           {groqKey && (
             <button
-              onClick={() => { setKeyAction("removed"); setGroqKeyState(""); setDraftKey(""); setTimeout(() => setShowKeyInput(false), 700); }}
+              onClick={() => {
+                setKeyAction("removed");
+                setGroqKeyState("");
+                setDraftKey("");
+                if (status === "running") { abortRef.current = true; setStatus(null); }
+                setTimeout(() => setShowKeyInput(false), 700);
+              }}
               style={{
                 background: "none", border: `1px solid ${keyAction === "removed" ? "var(--error, #ef4444)" : "var(--border)"}`,
                 borderRadius: "4px", cursor: "pointer",
@@ -1236,8 +1301,12 @@ function Results({ results, selected, toggle, onCopy, totalTokens, totalInRepo, 
   }
 
   function handleShare() {
-    const url = typeof window !== "undefined" ? window.location.href : "";
-    navigator.clipboard.writeText(url).catch(() => {});
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("s", "1");
+    const paths = results.filter(r => selected.has(r.path)).map(r => r.path);
+    url.searchParams.set("paths", paths.join(","));
+    navigator.clipboard.writeText(url.toString()).catch(() => {});
     setShared(true);
     setTimeout(() => setShared(false), 1800);
   }
