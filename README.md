@@ -1,24 +1,30 @@
 # mincontext
 
-**Find the exact files you need for any task in any GitHub repo.**
+<p align="center">
+  <strong>Find the minimum set of files needed for any task in any GitHub repo.</strong><br/>
+  <sub>Paste a repo. Describe your task. Get exactly the files worth reading.</sub>
+</p>
 
-Paste a GitHub repository and a task description. mincontext returns the minimum set of files a developer would need to open to complete that task — nothing more, nothing less. Copy the results directly into Claude, ChatGPT, Cursor, or any AI coding tool.
+<p align="center">
+  <a href="https://mincontext-app.vercel.app">Live Demo</a> ·
+  <a href="https://console.groq.com">Get a free Groq API key</a>
+</p>
+
+<p align="center">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue" />
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14-black" />
+  <img alt="Model" src="https://img.shields.io/badge/model-llama--3.3--70b-orange" />
+</p>
 
 ---
 
-## How it works
+## What it does
 
-1. **Paste a GitHub repo** — any public repository, any language, any size
-2. **Describe your task** — e.g. "add rate limiting middleware", "implement OAuth login", "add a custom health indicator"
-3. **Get the file set** — copy the GitHub links directly into your AI tool of choice
+You paste a GitHub repo and describe what you're building. mincontext returns the minimum set of files a developer would need to open to complete that task — nothing more. Copy the results straight into Claude, ChatGPT, Cursor, or any AI coding tool.
 
-The pipeline fetches the repository tree, pre-filters noise (tests, build artifacts, generated files, docs), fetches candidate file contents in parallel, builds an import graph to identify connected files, and runs two LLM passes: one to prune irrelevant candidates, one to verify completeness. The result is a small, precise set of files with a one-line explanation for each.
+## Results
 
----
-
-## Accuracy
-
-Evaluated across **27 repositories** spanning 10 languages and a range of repository sizes (29 to 20,717 files):
+Evaluated across **27 repositories** spanning 10 languages, from 29 to 20,717 files:
 
 | Metric | Score |
 |--------|-------|
@@ -26,35 +32,32 @@ Evaluated across **27 repositories** spanning 10 languages and a range of reposi
 | Precision | 93% |
 | File reduction | 98% |
 
-**Recall** is the fraction of files a developer would actually need, that the pipeline returned. **Precision** is the fraction of returned files that were genuinely needed. **File reduction** is the fraction of repository files eliminated.
-
-24 of 27 test cases produced fully correct output (100% recall and precision). The three exceptions are documented in [`docs/results.md`](docs/results.md) along with their root causes.
+24 of 27 test cases produced fully correct output (100% recall and precision). The three exceptions are documented in [`docs/results.md`](docs/results.md).
 
 ---
 
-## Usage
+## Getting started
 
-### Web app
+### Prerequisites
 
-[mincontext.app](https://mincontext.app) — requires a free [Groq API key](https://console.groq.com). Takes 2 minutes to set up, no credit card needed. Your key is stored only in your browser and never sent to our servers.
+- [Node.js 18+](https://nodejs.org)
+- A free [Groq API key](https://console.groq.com) (no credit card required)
 
-The pipeline uses `llama-3.3-70b-versatile` — the model all evaluation numbers above reflect.
-
-### Self-hosting
+### Installation
 
 ```bash
-git clone https://github.com/your-username/mincontext
-cd mincontext
+git clone https://github.com/ankushachwani/mincontext-app
+cd mincontext-app
 npm install
 ```
 
-Create `.env.local`:
+Create a `.env.local` file in the root:
 
-```
+```bash
 GROQ_API_KEY=gsk_your_key_here
 ```
 
-Get a free key at [console.groq.com](https://console.groq.com) — no credit card required.
+Start the dev server:
 
 ```bash
 npm run dev
@@ -64,45 +67,41 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Pipeline
+## How it works
 
 ```
 GitHub tree API
-  → pre-filter: strip tests, build artifacts, docs, generated files
-  → IDF-weighted path scoring: select up to 80 candidate files
-  → fetch all candidate contents in parallel (batched)
-  → rescue pass: sample cut files by content score, promote if stronger than weakest candidate
-  → parse imports/exports/symbols per file (JS/TS, Python, Go, Rust, Ruby, Java, PHP)
-  → build import graph → BFS from keyword-matching roots → reorder by relevance
-  → LLM prune pass: keep/remove decision per file with structural role annotations
-  → LLM sufficiency check: citation-gated base class recovery + registration file detection
+  → strip noise: tests, build artifacts, docs, generated files
+  → IDF-weighted path scoring → select up to 80 candidates
+  → fetch all candidate contents in parallel
+  → rescue pass: promote cut files that score higher than weakest candidates
+  → parse imports/exports/symbols, build import graph, reorder by relevance
+  → LLM prune pass: keep/remove per file with structural role annotations
+  → LLM sufficiency check: base class recovery + registration file detection
   → final file set with per-file reasoning
 ```
 
-The LLM receives structured file summaries — parsed imports, exports, symbols, and the first 15 lines of code — not raw file dumps. This keeps prompts compact and latency low while giving the model enough signal to make accurate keep/remove decisions.
+The LLM receives structured summaries — parsed symbols and the first 15 lines of each file — not raw dumps. This keeps prompts compact and latency low.
 
 ---
 
 ## Stack
 
-- [Next.js 14](https://nextjs.org) — App Router, Edge Functions
-- [Groq](https://groq.com) — LLM inference (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`)
-- GitHub REST API — repository tree and raw file content
-- Vercel KV — shared result cache (server-side, 7-day TTL)
+| | |
+|---|---|
+| Framework | [Next.js 14](https://nextjs.org) (App Router) |
+| Inference | [Groq](https://groq.com) — `llama-3.3-70b-versatile` |
+| Data | GitHub REST API |
+| Cache | Vercel KV (7-day TTL) |
 
 ---
 
-## Deploying
+## Contributing
 
-1. Push to GitHub, import project on [Vercel](https://vercel.com)
-2. Add environment variable: `GROQ_API_KEY=gsk_...`
-3. Vercel dashboard → Storage → Create KV database → Connect to project
-4. Deploy
-
-The KV cache means the first request for a given repo/task pays the LLM cost; all subsequent users receive the cached result in ~500ms with no model call.
+Pull requests are welcome. For significant changes, open an issue first to discuss what you'd like to change.
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE)
