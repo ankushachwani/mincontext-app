@@ -339,6 +339,29 @@ function HomePage() {
             </div>
           ))}
         </div>
+
+        {/* CLI link */}
+        <div style={{ marginTop: "2rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)" }}>
+          <a
+            href="/cli"
+            style={{
+              color: "var(--accent)",
+              fontSize: "0.8rem",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              opacity: 0.85,
+              transition: "opacity 0.15s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+            onMouseLeave={e => e.currentTarget.style.opacity = "0.85"}
+          >
+            <span>↓</span>
+            <span>Download the CLI</span>
+            <span style={{ color: "var(--text-muted)" }}>— use mincontext in your terminal</span>
+          </a>
+        </div>
       </div>
     </main>
   );
