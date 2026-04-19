@@ -23,9 +23,9 @@
 
 ---
 
-mincontext figures out which files in a codebase are actually relevant to what you're building. Give it a GitHub repo and a task description — it returns a small, precise set of files to read or modify, cutting out everything else. Copy the results straight into Claude, Cursor, ChatGPT, or any AI coding tool.
+mincontext figures out which files in a codebase are actually relevant to what you're building. Give it a GitHub repo or a local directory and a task description — it returns a small, precise set of files to read or modify, cutting out everything else.
 
-Available as a **web app** and a **CLI**.
+Available as a **web app**, a **CLI**, and an **MCP server** that works directly inside Claude, Cursor, and any other MCP-capable AI tool.
 
 ---
 
@@ -40,6 +40,70 @@ Evaluated across **27 repositories** spanning 10 languages, from 29 to 20,717 fi
 | File reduction | 98% |
 
 24 of 27 test cases produced fully correct output (100% recall and precision). The three exceptions are documented in [`docs/results.md`](docs/results.md).
+
+---
+
+## MCP Server
+
+The MCP server lets Claude (and any MCP-compatible AI tool) call mincontext as a tool mid-conversation — no copy-pasting required. Works on local repos and GitHub repos.
+
+### Install
+
+```bash
+npm install -g mincontext-mcp
+```
+
+Then register it with Claude Code:
+
+```bash
+claude mcp add mincontext --scope user -- mincontext-mcp
+```
+
+Or without a global install:
+
+```bash
+claude mcp add mincontext --scope user -- npx mincontext-mcp
+```
+
+### Usage
+
+Once registered, just ask Claude:
+
+> "Use mincontext to find the files I need to add rate limiting"
+
+It auto-detects the git root of your current project. For GitHub repos, pass the repo explicitly:
+
+> "Use mincontext on rails/rails to find the files for adding caching"
+
+**First call to any repo** — mincontext asks which LLM backend to use and saves your choice:
+
+```
+First time using /your/project with mincontext.
+
+  llm="groq"   — free cloud API, fast (your key is already set)
+  llm="ollama" — local model, no API key needed, auto-started if not running
+
+Your choice will be saved for all future calls to this repo.
+```
+
+**Subsequent calls** — uses the saved preference, no prompt.
+
+### Tools exposed
+
+| Tool | Description |
+|------|-------------|
+| `get_relevant_files` | Find the minimum file set for a task — local or GitHub repo |
+| `set_groq_key` | Save your Groq API key (stored in macOS keychain or `~/.cache/mincontext/`) |
+| `list_config` | Show your saved key status and per-repo preferences |
+
+### LLM backends
+
+| Backend | Setup | Speed |
+|---------|-------|-------|
+| `groq` | Free API key from [console.groq.com](https://console.groq.com) | Fast |
+| `ollama` | No account needed — auto-started, model auto-downloaded | Local |
+
+If Groq hits a rate limit, mincontext tells you and offers to switch to Ollama. To change a saved preference, just pass `llm` again on any call.
 
 ---
 
@@ -150,7 +214,7 @@ Type `/` at any prompt to open the command menu with live filtering and arrow-ke
 
 ## How it works
 
-The same pipeline runs on both the web app and the CLI:
+The same pipeline runs across the web app, CLI, and MCP server:
 
 ```
 repo / local directory
@@ -175,8 +239,9 @@ The LLM receives structured summaries — parsed symbols and the first 15 lines 
 | Framework | [Next.js 14](https://nextjs.org) (App Router) |
 | Inference | [Groq](https://groq.com) — `llama-3.3-70b-versatile` |
 | CLI | Node.js 18+, [chalk](https://github.com/chalk/chalk), [enquirer](https://github.com/enquirer/enquirer) |
+| MCP server | Node.js 18+, [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) |
 | Data | GitHub REST API |
-| Cache | Vercel KV (server) · localStorage (browser) · `~/.cache/mincontext` (CLI) |
+| Cache | Vercel KV (server) · localStorage (browser) · `~/.cache/mincontext` (CLI + MCP) |
 
 ---
 
