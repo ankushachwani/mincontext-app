@@ -1,0 +1,38 @@
+{
+  "name": "mincontext-mcp",
+  "version": "1.0.1",
+  "description": "MCP server for mincontext — find the minimum set of files needed for any codebase task",
+  "type": "module",
+  "bin": {
+    "mincontext-mcp": "src/index.js"
+  },
+  "files": [
+    "src/",
+    "lib/",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "context",
+    "codebase",
+    "ai"
+  ],
+  "author": "Ankush Achwani",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ankushachwani/mincontext-app"
+  },
+  "homepage": "https://mincontext.dev",
+  "license": "MIT"
+}
