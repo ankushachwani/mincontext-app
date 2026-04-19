@@ -1,0 +1,48 @@
+{
+  "name": "mincontext",
+  "version": "1.0.0",
+  "description": "Find the minimum set of files needed to complete a task in any GitHub repo or local codebase.",
+  "type": "module",
+  "bin": {
+    "mincontext": "./bin/mincontext.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "lib",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "enquirer": "^2.4.1",
+    "ora": "^8.0.1"
+  },
+  "keywords": [
+    "ai",
+    "context",
+    "cli",
+    "github",
+    "llm",
+    "groq",
+    "ollama",
+    "code",
+    "codebase",
+    "context-window",
+    "developer-tools",
+    "mincontext"
+  ],
+  "author": "Ankush Achwani",
+  "license": "MIT",
+  "homepage": "https://mincontext.dev/cli",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ankushachwani/mincontext-app"
+  },
+  "bugs": {
+    "url": "https://github.com/ankushachwani/mincontext-app/issues"
+  }
+}
