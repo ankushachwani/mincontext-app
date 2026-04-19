@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://mincontext.dev">
-    <img alt="Website" src="https://img.shields.io/badge/website-mincontext.dev-000000?style=for-the-badge&logo=vercel&logoColor=white" />
+  <a href="https://mincontext-app.vercel.app">
+    <img alt="Website" src="https://img.shields.io/badge/website-mincontext--app.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white" />
   </a>
 </p>
 
