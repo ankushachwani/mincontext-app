@@ -52,7 +52,7 @@ export default function CliPage() {
 
   return (
     <main style={{
-      minHeight: "100vh",
+      flex: 1,
       background: "var(--bg)",
       display: "flex",
       flexDirection: "column",
