@@ -122,7 +122,7 @@ function HomePage() {
   ];
 
   return (
-    <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem", background: "var(--bg)", position: "relative" }}>
+    <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem", background: "var(--bg)", position: "relative" }}>
 
       {/* Top-right API key button */}
       <div style={{ position: "fixed", top: "1rem", right: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem", zIndex: 20 }}>
@@ -327,7 +327,7 @@ function HomePage() {
           ))}
         </div>
 
-        <div style={{ marginTop: "3rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+        <div style={{ marginTop: "3rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "1rem" }}>
           {[
             { label: "Import-aware", desc: "Builds a real import graph across the repo — connected files surface together." },
             { label: "Any language", desc: "JavaScript, TypeScript, Python, Go, Rust, Ruby, Java, and more." },
@@ -340,27 +340,32 @@ function HomePage() {
           ))}
         </div>
 
-        {/* CLI link */}
-        <div style={{ marginTop: "2rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)" }}>
-          <a
-            href="/cli"
-            style={{
-              color: "var(--accent)",
-              fontSize: "0.8rem",
-              textDecoration: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              opacity: 0.85,
-              transition: "opacity 0.15s",
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = "1"}
-            onMouseLeave={e => e.currentTarget.style.opacity = "0.85"}
-          >
-            <span>↓</span>
-            <span>Download the CLI</span>
-            <span style={{ color: "var(--text-muted)" }}>— use mincontext in your terminal</span>
-          </a>
+        {/* CLI + MCP links */}
+        <div style={{ marginTop: "2rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border)", display: "flex", gap: "2rem", flexWrap: "wrap", justifyContent: "center" }}>
+          {[
+            { href: "/cli", icon: "↓", label: "Download the CLI" },
+            { href: "/mcp", icon: "↓", label: "Add MCP server" },
+          ].map(({ href, icon, label }) => (
+            <a
+              key={href}
+              href={href}
+              style={{
+                color: "var(--accent)",
+                fontSize: "0.85rem",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.4rem",
+                opacity: 0.85,
+                transition: "opacity 0.15s",
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+              onMouseLeave={e => e.currentTarget.style.opacity = "0.85"}
+            >
+              <span>{icon}</span>
+              <span>{label}</span>
+            </a>
+          ))}
         </div>
       </div>
     </main>
@@ -959,7 +964,7 @@ Return ONLY valid JSON:
   const totalTokens = selectedResults.reduce((sum, r) => sum + Math.ceil((r.content || "").length / 4), 0);
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, background: "var(--bg)", display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <header style={{
         borderBottom: "1px solid var(--border)",
